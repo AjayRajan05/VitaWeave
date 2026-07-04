@@ -20,7 +20,7 @@ import {
   Plus,
   CheckCircle,
 } from 'lucide-react-native';
-import { Colors, Fonts } from '../constants/theme';
+import { Colors, Fonts } from '../_constants/theme';
 
 type Service = {
   id: number;

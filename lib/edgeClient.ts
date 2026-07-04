@@ -4,6 +4,7 @@ import { logger } from './logger';
 export type GeminiProxyRequest = {
   prompt: string;
   context?: string;
+  language?: string;
 };
 
 export type GeminiProxyResponse = {

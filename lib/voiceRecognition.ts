@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { isDevModeEnabled } from './devMode';
 import { logger } from './logger';
+import { getLocale } from './i18n';
 
 export interface VoiceRecognitionResult {
   transcript: string;
@@ -8,28 +9,36 @@ export interface VoiceRecognitionResult {
   error?: string;
 }
 
-type VoiceModule = {
-  isAvailable: () => Promise<boolean>;
-  start: (locale: string) => Promise<void>;
-  stop: () => Promise<void>;
-  destroy: () => Promise<void>;
-  removeAllListeners: () => void;
-  onSpeechResults: ((event: { value?: string[] }) => void) | null;
-  onSpeechError: ((event: { error?: { message?: string } }) => void) | null;
-  onSpeechEnd: (() => void) | null;
+type ExpoSpeechModule = {
+  isRecognitionAvailable: () => boolean;
+  requestPermissionsAsync: () => Promise<{ granted: boolean }>;
+  start: (options: { lang: string; interimResults: boolean; continuous: boolean }) => void;
+  stop: () => void;
+  abort: () => void;
+  addListener: (
+    event: 'result' | 'error' | 'end',
+    handler: (event: Record<string, unknown>) => void
+  ) => { remove: () => void };
 };
 
-let Voice: VoiceModule | null = null;
+const LOCALE_TO_BCP47: Record<string, string> = {
+  en: 'en-IN',
+  hi: 'hi-IN',
+  ta: 'ta-IN',
+};
 
-function loadVoiceModule(): VoiceModule | null {
+let ExpoSpeechRecognitionModule: ExpoSpeechModule | null = null;
+
+function loadExpoSpeechModule(): ExpoSpeechModule | null {
   if (Platform.OS === 'web') return null;
-  if (Voice) return Voice;
+  if (ExpoSpeechRecognitionModule) return ExpoSpeechRecognitionModule;
 
   try {
-    Voice = require('@react-native-voice/voice').default;
-    return Voice;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ExpoSpeechRecognitionModule = require('expo-speech-recognition').ExpoSpeechRecognitionModule;
+    return ExpoSpeechRecognitionModule;
   } catch {
-    logger.warn('@react-native-voice/voice not available — use an EAS dev build for native voice');
+    logger.warn('expo-speech-recognition not available — use an EAS dev build for native voice');
     return null;
   }
 }
@@ -38,8 +47,8 @@ export class VoiceRecognitionService {
   private static instance: VoiceRecognitionService;
   private recognition: any = null;
   private isListening = false;
-  private resultCallback?: (result: VoiceRecognitionResult) => void;
-  private errorCallback?: (error: string) => void;
+  private activeLang = 'en-IN';
+  private listeners: { remove: () => void }[] = [];
 
   static getInstance(): VoiceRecognitionService {
     if (!VoiceRecognitionService.instance) {
@@ -52,17 +61,19 @@ export class VoiceRecognitionService {
     if (Platform.OS === 'web') {
       return 'webkitSpeechRecognition' in globalThis || 'SpeechRecognition' in globalThis;
     }
-    return Boolean(loadVoiceModule()) || isDevModeEnabled();
+    const mod = loadExpoSpeechModule();
+    return Boolean(mod?.isRecognitionAvailable()) || isDevModeEnabled();
   }
 
   async requestPermissions(): Promise<boolean> {
     if (Platform.OS === 'web') return true;
 
-    const voice = loadVoiceModule();
-    if (!voice) return isDevModeEnabled();
+    const mod = loadExpoSpeechModule();
+    if (!mod) return isDevModeEnabled();
 
     try {
-      return await voice.isAvailable();
+      const result = await mod.requestPermissionsAsync();
+      return result.granted;
     } catch {
       return false;
     }
@@ -85,16 +96,15 @@ export class VoiceRecognitionService {
       return false;
     }
 
-    this.resultCallback = onResult;
-    this.errorCallback = onError;
+    this.activeLang = LOCALE_TO_BCP47[getLocale()] ?? 'en-IN';
 
     if (Platform.OS === 'web') {
       return this.startWebListening(onResult, onError);
     }
 
-    const voice = loadVoiceModule();
-    if (voice) {
-      return this.startNativeListening(voice, onResult, onError);
+    const mod = loadExpoSpeechModule();
+    if (mod) {
+      return this.startExpoListening(mod, onResult, onError);
     }
 
     return this.startSimulatedListening(onResult, onError);
@@ -110,13 +120,18 @@ export class VoiceRecognitionService {
       this.recognition = null;
     }
 
-    const voice = loadVoiceModule();
-    if (voice && this.isListening) {
-      voice.stop().catch(() => undefined);
-      voice.removeAllListeners();
+    const mod = loadExpoSpeechModule();
+    if (mod && this.isListening) {
+      mod.stop();
+      this.clearListeners();
     }
 
     this.isListening = false;
+  }
+
+  private clearListeners(): void {
+    this.listeners.forEach((l) => l.remove());
+    this.listeners = [];
   }
 
   private startWebListening(
@@ -124,25 +139,25 @@ export class VoiceRecognitionService {
     onError?: (error: string) => void
   ): boolean {
     try {
-      const SpeechRecognition =
+      const SpeechRecognitionCtor =
         (globalThis as any).webkitSpeechRecognition || (globalThis as any).SpeechRecognition;
 
-      if (!SpeechRecognition) {
+      if (!SpeechRecognitionCtor) {
         onError?.('Speech recognition not supported in this browser');
         return false;
       }
 
-      this.recognition = new SpeechRecognition();
+      this.recognition = new SpeechRecognitionCtor();
       this.recognition.continuous = false;
       this.recognition.interimResults = false;
-      this.recognition.lang = 'en-IN';
+      this.recognition.lang = this.activeLang;
 
       this.recognition.onstart = () => {
         this.isListening = true;
       };
 
       this.recognition.onresult = (event: any) => {
-        const result = event.results[0][0];
+        const result = event.results[0]?.[0];
         if (result) {
           onResult({ transcript: result.transcript, confidence: result.confidence });
         }
@@ -160,42 +175,54 @@ export class VoiceRecognitionService {
 
       this.recognition.start();
       return true;
-    } catch (error) {
+    } catch {
       onError?.('Failed to initialize speech recognition');
       return false;
     }
   }
 
-  private startNativeListening(
-    voice: VoiceModule,
+  private startExpoListening(
+    mod: ExpoSpeechModule,
     onResult: (result: VoiceRecognitionResult) => void,
     onError?: (error: string) => void
   ): boolean {
     try {
-      voice.removeAllListeners();
+      this.clearListeners();
 
-      voice.onSpeechResults = (event) => {
-        const transcript = event.value?.[0];
-        if (transcript) {
-          onResult({ transcript, confidence: 0.9 });
-        }
-        this.isListening = false;
-      };
+      this.listeners.push(
+        mod.addListener('result', (event) => {
+          const results = event.results as { transcript?: string; confidence?: number }[] | undefined;
+          const transcript = results?.[0]?.transcript;
+          if (transcript) {
+            onResult({ transcript, confidence: results?.[0]?.confidence ?? 0.9 });
+          }
+          this.isListening = false;
+        })
+      );
 
-      voice.onSpeechError = (event) => {
-        this.isListening = false;
-        onError?.(event.error?.message || 'Voice recognition failed');
-      };
+      this.listeners.push(
+        mod.addListener('error', (event) => {
+          this.isListening = false;
+          const message = (event.error as string | undefined) || (event.message as string | undefined);
+          onError?.(message || 'Voice recognition failed');
+        })
+      );
 
-      voice.onSpeechEnd = () => {
-        this.isListening = false;
-      };
+      this.listeners.push(
+        mod.addListener('end', () => {
+          this.isListening = false;
+        })
+      );
 
       this.isListening = true;
-      voice.start('en-IN');
+      mod.start({
+        lang: this.activeLang,
+        interimResults: false,
+        continuous: false,
+      });
       return true;
-    } catch (error) {
-      onError?.('Failed to start native voice recognition');
+    } catch {
+      onError?.('Failed to start speech recognition');
       return false;
     }
   }
@@ -205,7 +232,7 @@ export class VoiceRecognitionService {
     onError?: (error: string) => void
   ): boolean {
     if (!isDevModeEnabled()) {
-      onError?.('Native voice module unavailable. Build with EAS dev client.');
+      onError?.('Speech recognition unavailable. Build with EAS dev client.');
       return false;
     }
 
@@ -224,10 +251,11 @@ export class VoiceRecognitionService {
   }
 
   getSupportedLanguages(): string[] {
-    return ['en-IN', 'hi-IN', 'bn-IN', 'te-IN', 'ta-IN', 'mr-IN', 'gu-IN', 'kn-IN', 'ml-IN'];
+    return ['en-IN', 'hi-IN', 'ta-IN', 'bn-IN', 'te-IN', 'mr-IN', 'gu-IN', 'kn-IN', 'ml-IN'];
   }
 
   setLanguage(language: string): void {
+    this.activeLang = language;
     if (this.recognition && Platform.OS === 'web') {
       this.recognition.lang = language;
     }
@@ -235,7 +263,7 @@ export class VoiceRecognitionService {
 
   cleanup(): void {
     this.stopListening();
-    loadVoiceModule()?.destroy().catch(() => undefined);
+    loadExpoSpeechModule()?.abort();
   }
 }
 

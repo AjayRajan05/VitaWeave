@@ -1,14 +1,14 @@
+import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { normalizeRole, type UserRole } from './roles';
-import { persistSession, clearSession } from './authGuard';
+import { persistSession, clearSessionStorage } from './sessionStorage';
 import { SentryManager } from './sentry';
 import { Analytics } from './analytics';
+import { registerDevicePushToken } from './pushTokens';
+import { logAuditEvent } from './auditLog';
 
 export type { UserRole };
 
-/**
- * Sign in with Email and Password
- */
 export async function signInWithEmail(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -23,9 +23,6 @@ export async function signInWithEmail(email: string, password: string) {
     return { data };
 }
 
-/**
- * Sign up with Email and Password — stores lowercase role in profiles.
- */
 export async function signUpWithEmail(
     email: string,
     password: string,
@@ -43,6 +40,7 @@ export async function signUpWithEmail(
         options: {
             data: {
                 full_name: name,
+                role: normalizedRole,
             },
         },
     });
@@ -52,32 +50,38 @@ export async function signUpWithEmail(
         return { error };
     }
 
-    if (data.user) {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-            id: data.user.id,
-            email,
-            name,
-            role: normalizedRole,
-        });
+    if (data.user && data.session) {
+        const { error: profileError } = await supabase.from('profiles').upsert(
+            {
+                id: data.user.id,
+                email,
+                name,
+                role: normalizedRole,
+            },
+            { onConflict: 'id' }
+        );
 
         if (profileError) {
-            console.error('Profile Creation error:', profileError.message);
+            console.error('Profile sync error:', profileError.message);
             return { error: profileError };
         }
 
         if (normalizedRole === 'patient') {
-            const { error: patientError } = await supabase.from('patients').insert({
-                name,
-                age: 0,
-                gender: 'Not Specified',
-                condition: 'General',
-                status: 'Stable',
-                risk_level: 'Low',
-                profile_id: data.user.id,
-            });
+            const { error: patientError } = await supabase.from('patients').upsert(
+                {
+                    name,
+                    age: 1,
+                    gender: 'Not Specified',
+                    condition: 'General',
+                    status: 'Stable',
+                    risk_level: 'Low',
+                    profile_id: data.user.id,
+                },
+                { onConflict: 'profile_id', ignoreDuplicates: true }
+            );
 
             if (patientError) {
-                console.error('Patient record creation error:', patientError.message);
+                console.error('Patient record sync error:', patientError.message);
             }
         }
     }
@@ -85,9 +89,56 @@ export async function signUpWithEmail(
     return { data };
 }
 
-/**
- * Verify session + profile role after login, then persist routing state.
- */
+/** Create or repair a profile row from auth metadata (handles trigger/RLS gaps). */
+export async function ensureUserProfile(user: User, expectedRole?: UserRole) {
+    const { data: existing } = await getUserProfile(user.id);
+    if (existing) {
+        return { data: existing, error: null };
+    }
+
+    const meta = user.user_metadata ?? {};
+    const name =
+        (meta.full_name as string | undefined) ??
+        (meta.name as string | undefined) ??
+        user.email?.split('@')[0] ??
+        'User';
+    const role =
+        normalizeRole((meta.role as string | undefined) ?? expectedRole) ??
+        expectedRole ??
+        'patient';
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .upsert(
+            {
+                id: user.id,
+                email: user.email,
+                name,
+                role,
+            },
+            { onConflict: 'id' }
+        )
+        .select('*')
+        .single();
+
+    if (!error && role === 'patient') {
+        await supabase.from('patients').upsert(
+            {
+                name,
+                age: 1,
+                gender: 'Not Specified',
+                condition: 'General',
+                status: 'Stable',
+                risk_level: 'Low',
+                profile_id: user.id,
+            },
+            { onConflict: 'profile_id', ignoreDuplicates: true }
+        );
+    }
+
+    return { data, error };
+}
+
 export async function completeRoleLogin(expectedRole: UserRole) {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !sessionData.session?.user) {
@@ -95,22 +146,33 @@ export async function completeRoleLogin(expectedRole: UserRole) {
     }
 
     const user = sessionData.session.user;
-    const { data: profile, error: profileError } = await getUserProfile(user.id);
+    let { data: profile, error: profileError } = await getUserProfile(user.id);
 
     if (profileError || !profile) {
-        await clearSession();
+        const repaired = await ensureUserProfile(user, expectedRole);
+        profile = repaired.data;
+        profileError = repaired.error;
+    }
+
+    if (profileError || !profile) {
+        await clearSessionStorage();
+        await supabase.auth.signOut();
         throw new Error('User profile not found. Please contact support.');
     }
 
     const role = normalizeRole(profile.role);
     if (role !== expectedRole) {
-        await clearSession();
+        await clearSessionStorage();
+        await supabase.auth.signOut();
         throw new Error(
             `This account is registered as ${role ?? 'unknown'}. Please use the correct portal.`
         );
     }
 
     await persistSession(role, user.id);
+
+    registerDevicePushToken(user.id).catch(() => undefined);
+    logAuditEvent({ action: 'login', resourceType: 'session', resourceId: user.id }).catch(() => undefined);
 
     SentryManager.setUser({
       id: user.id,
@@ -122,31 +184,23 @@ export async function completeRoleLogin(expectedRole: UserRole) {
     return { user, profile, role };
 }
 
-/**
- * Sign out and clear local session state.
- */
 export async function signOutUser() {
     SentryManager.clearUser();
     Analytics.trackAuth('logout');
-    await clearSession();
+    await clearSessionStorage();
+    await supabase.auth.signOut();
 }
 
-/** Kept for existing imports */
 export async function signOut() {
-    await clearSession();
+    await clearSessionStorage();
+    await supabase.auth.signOut();
 }
 
-/**
- * Get current session user
- */
 export async function getCurrentUser() {
     const { data: { user } } = await supabase.auth.getUser();
     return user;
 }
 
-/**
- * Get profile data for the logged in user
- */
 export async function getUserProfile(userId: string) {
     const { data, error } = await supabase
         .from('profiles')

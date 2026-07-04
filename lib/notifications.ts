@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from './logger';
 
@@ -8,9 +9,17 @@ const LAST_ALERT_DIGEST_KEY = '@vitaweave_last_alert_digest';
 type NotificationModule = typeof import('expo-notifications');
 
 let Notifications: NotificationModule | null = null;
+let notificationsUnavailable = false;
+
+function canUseNotifications(): boolean {
+  if (Platform.OS === 'web') return false;
+  // Push/local notification module crashes in Expo Go (SDK 53+)
+  if (Constants.appOwnership === 'expo') return false;
+  return true;
+}
 
 async function loadNotifications(): Promise<NotificationModule | null> {
-  if (Platform.OS === 'web') return null;
+  if (!canUseNotifications() || notificationsUnavailable) return null;
   if (Notifications) return Notifications;
 
   try {
@@ -26,7 +35,8 @@ async function loadNotifications(): Promise<NotificationModule | null> {
     });
     return Notifications;
   } catch {
-    logger.warn('expo-notifications not available');
+    notificationsUnavailable = true;
+    logger.warn('expo-notifications not available on this build');
     return null;
   }
 }
@@ -75,9 +85,6 @@ export async function scheduleLocalNotification(params: {
   });
 }
 
-/**
- * Notify user about urgent dashboard tasks and weekly alerts (deduped).
- */
 export async function notifyCareTeamDigest(params: {
   urgentTasks: number;
   highAlerts: number;

@@ -9,7 +9,8 @@ import { useRouter } from 'expo-router';
 import { UserPlus, User, Hash, AlertTriangle, ArrowLeft, Camera, Image as ImageIcon } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { addPatient } from '../../lib/api';
-import { Colors, Fonts } from '../constants/theme';
+import { mapPatientToDbInsert } from '../../lib/patientMapper';
+import { Colors, Fonts } from '../_constants/theme';
 import { supabase } from '../../lib/supabase';
 import { imageUploadService } from '../../lib/imageUpload';
 
@@ -79,20 +80,24 @@ export default function AddPatientScreen() {
             // Use uploaded image or default avatar
             const finalImageUrl = imageUrl || imageUploadService.getDefaultAvatar();
 
-            const newPatientData = {
-                id: crypto.randomUUID(),
-                name,
-                age: parseInt(age),
-                gender: gender || 'Not Specified',
-                condition,
-                status: 'Stable',
-                risk_level: 'Low',
-                phone: phone,
-                image_url: finalImageUrl,
-                assigned_asha_id: ashaId,
-            };
+            const newPatientData = mapPatientToDbInsert(
+                {
+                    name,
+                    age: parseInt(age, 10),
+                    condition,
+                    phone,
+                    image: finalImageUrl,
+                    status: 'Stable',
+                    riskLevel: 'Low',
+                },
+                {
+                    id: crypto.randomUUID(),
+                    gender: gender || 'Not Specified',
+                    assigned_asha_id: ashaId,
+                }
+            );
 
-            const { error } = await supabase.from('patients').insert([newPatientData]);
+            const { error } = await addPatient(newPatientData);
 
             if (error) {
                 console.error("Supabase insert error:", error);

@@ -4,10 +4,11 @@
  */
 declare module 'lucide-react-native' {
   import type { ForwardRefExoticComponent } from 'react';
+  import type { ColorValue } from 'react-native';
   import type { SvgProps } from 'react-native-svg';
 
   export type LucideIcon = ForwardRefExoticComponent<
-    SvgProps & { size?: number | string; color?: string }
+    SvgProps & { size?: number | string; color?: ColorValue }
   >;
 
   export const Activity: LucideIcon;

@@ -8,8 +8,8 @@ import { useRouter } from 'expo-router';
 import { AlertCircle, ArrowLeft } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { addWeeklyAlert } from '../../lib/api';
-import { Colors, Fonts } from '../constants/theme';
-import type { RiskLevel } from '../constants/data';
+import { Colors, Fonts } from '../_constants/theme';
+import type { RiskLevel } from '../_constants/data';
 
 export default function AddAlertScreen() {
     const router = useRouter();

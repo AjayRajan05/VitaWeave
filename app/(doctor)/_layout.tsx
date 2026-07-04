@@ -8,6 +8,7 @@ import {
 } from 'lucide-react-native';
 import { Platform, StyleSheet, useWindowDimensions, View, ActivityIndicator } from 'react-native';
 import { useRoleGuard } from '../../lib/authGuard';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
 
 export default function DoctorTabLayout() {
     const { width } = useWindowDimensions();
@@ -36,6 +37,11 @@ export default function DoctorTabLayout() {
                 tabBarLabelStyle: styles.tabBarLabel,
                 headerStyle: styles.header,
                 headerTitleStyle: styles.headerTitle,
+                headerRight: () => (
+                    <View style={styles.headerRight}>
+                        <SyncStatusDot accentColor="#0891b2" />
+                    </View>
+                ),
             }}>
             <Tabs.Screen
                 name="index"
@@ -65,6 +71,14 @@ export default function DoctorTabLayout() {
                     tabBarIcon: ({ color }) => <User size={20} color={color} />,
                 }}
             />
+            {/* Secondary screens — reachable from Dashboard */}
+            <Tabs.Screen name="refer-patient" options={{ href: null, title: 'Refer Patient' }} />
+      <Tabs.Screen name="referrals" options={{ href: null, title: 'Referrals' }} />
+      <Tabs.Screen name="campaigns" options={{ href: null, title: 'Campaigns' }} />
+            <Tabs.Screen name="telemedicine" options={{ href: null, title: 'Telemedicine' }} />
+            <Tabs.Screen name="insights" options={{ href: null, title: 'Insights' }} />
+            <Tabs.Screen name="record-visit" options={{ href: null, title: 'Record Visit' }} />
+            <Tabs.Screen name="add-patient" options={{ href: null, title: 'Add Patient' }} />
         </Tabs>
     );
 }
@@ -102,4 +116,5 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#0f172a',
     },
+    headerRight: { marginRight: 14 },
 });

@@ -220,6 +220,10 @@ CREATE POLICY "Public weekly trends are viewable by everyone" ON public.weekly_t
 CREATE POLICY "Public AI insights are viewable by everyone" ON public.ai_insights FOR SELECT USING (true);
 
 -- User-specific Policies
+CREATE POLICY "Users can insert their own profile" ON public.profiles
+    FOR INSERT
+    WITH CHECK (auth.uid() = id);
+
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
 CREATE POLICY "Patients viewable by healthcare workers or self" ON public.patients FOR SELECT USING (
@@ -254,6 +258,63 @@ CREATE TRIGGER handle_patients_updated_at BEFORE UPDATE ON public.patients FOR E
 CREATE TRIGGER handle_medical_records_updated_at BEFORE UPDATE ON public.medical_records FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 CREATE TRIGGER handle_appointments_updated_at BEFORE UPDATE ON public.appointments FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 CREATE TRIGGER handle_ai_chat_history_updated_at BEFORE UPDATE ON public.ai_chat_history FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- 15b. AUTO-CREATE PROFILE (AND PATIENT RECORD) ON AUTH SIGNUP
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    user_role TEXT;
+    user_name TEXT;
+BEGIN
+    user_role := COALESCE(NEW.raw_user_meta_data->>'role', 'patient');
+    user_name := COALESCE(
+        NEW.raw_user_meta_data->>'full_name',
+        NEW.raw_user_meta_data->>'name',
+        split_part(NEW.email, '@', 1)
+    );
+
+    INSERT INTO public.profiles (id, email, name, role)
+    VALUES (NEW.id, NEW.email, user_name, user_role)
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        name = EXCLUDED.name,
+        role = EXCLUDED.role;
+
+    IF user_role = 'patient' THEN
+        INSERT INTO public.patients (
+            name,
+            age,
+            gender,
+            condition,
+            status,
+            risk_level,
+            profile_id
+        )
+        VALUES (
+            user_name,
+            1,
+            'Not Specified',
+            'General',
+            'Stable',
+            'Low',
+            NEW.id
+        )
+        ON CONFLICT (profile_id) DO NOTHING;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user();
 
 -- ==============================================================================
 -- 16. PHASE 1 — PATIENT HEALTH DATA & CAMPAIGNS

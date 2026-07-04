@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getPatientsForCaregiver } from '@/lib/api';
 import { getStoredUserId } from '@/lib/authGuard';
 import { resolveWithDemoFallback } from '@/lib/dataPolicy';
-import { ALL_PATIENTS, type Patient } from '@/app/constants/data';
+import { ALL_PATIENTS, type Patient } from '@/app/_constants/data';
 import type { UserRole } from '@/lib/roles';
 
 export function useCareTeamPatients(role: UserRole) {

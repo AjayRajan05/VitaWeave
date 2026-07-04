@@ -139,6 +139,10 @@ export default function RoleSelector() {
             <TouchableOpacity style={styles.privacyLink} onPress={() => router.push('/privacy-policy')}>
                 <Text style={styles.privacyText}>Privacy Policy</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.supervisorLink} onPress={() => router.push('/admin-login' as any)}>
+                <Text style={styles.supervisorText}>District supervisor login</Text>
+            </TouchableOpacity>
         </ScrollView>
     );
 }
@@ -246,4 +250,6 @@ const styles = StyleSheet.create({
         color: '#64748b',
         textDecorationLine: 'underline',
     },
+    supervisorLink: { marginTop: 16, alignSelf: 'center' },
+    supervisorText: { fontFamily: 'Inter-Regular', fontSize: 12, color: '#94a3b8' },
 });

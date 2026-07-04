@@ -1,42 +1,30 @@
-import { calculateRisk, prioritizePatients } from './logic';
-import { addDashboardTask, updatePatientRisk } from './api';
-import type { Patient } from '../app/constants/data';
+import { calculateUrgencyScore, prioritizePatients } from './logic';
+import { addDashboardTask } from './api';
+import { recalculateAndPersistUrgency } from './urgencyWorkflow';
+import type { Patient } from '../app/_constants/data';
 import { getStoredUserId } from './authGuard';
 import { logger } from './logger';
 
 /**
- * Re-score patients, persist risk levels, and return prioritized list for UI.
+ * Re-score patients using NEWS2 + maternal rules, persist urgency_score + risk_level.
  */
 export async function runPatientTriage(patients: Patient[]): Promise<Patient[]> {
-  const triaged = prioritizePatients(
-    patients.map((patient) => ({
-      ...patient,
-      riskLevel: calculateRisk(patient),
-    }))
+  const scored = await Promise.all(
+    patients.map((p) => recalculateAndPersistUrgency(p).catch(() => p))
   );
 
-  await Promise.all(
-    triaged.map((patient) =>
-      updatePatientRisk(patient.id, patient.riskLevel).catch((error) => {
-        logger.warn('Failed to persist triage risk', { patientId: patient.id, error });
-      })
-    )
-  );
-
-  return triaged;
+  return prioritizePatients(scored);
 }
 
-/**
- * After a clinical visit, optionally queue a follow-up task for high-risk patients.
- */
 export async function queueFollowUpTaskAfterVisit(patient: Patient, reason: string): Promise<void> {
-  if (patient.riskLevel !== 'High' && !patient.followUpUrgent) return;
+  const score = patient.urgencyScore ?? calculateUrgencyScore(patient).score;
+  if (score < 50 && !patient.followUpUrgent) return;
 
   const ashaId = await getStoredUserId();
   await addDashboardTask({
     title: `Follow up: ${patient.name}`,
     subtitle: reason,
-    priority: patient.riskLevel === 'High' ? 'urgent' : 'today',
+    priority: score >= 80 ? 'urgent' : score >= 50 ? 'today' : 'routine',
     icon: 'activity',
     assignedTo: ashaId ?? undefined,
   });

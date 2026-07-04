@@ -22,20 +22,26 @@ import {
   Radio,
   Plus,
   Sparkles,
+  BriefcaseMedical,
+  Syringe,
+  UserPlus,
 } from 'lucide-react-native';
-import { Colors, Fonts, getRiskColors } from '../constants/theme';
+import { Colors, Fonts, getRiskColors } from '../_constants/theme';
 import {
   COMMUNITY_RISK_LEVEL,
   WEEKLY_ALERTS,
   DASHBOARD_TASKS,
   ALL_PATIENTS,
   type RiskLevel,
-} from '../constants/data';
+} from '../_constants/data';
 import { getDashboardTasks, getWeeklyAlerts, getPatientsForCaregiver, addDashboardTask } from '../../lib/api';
 import { generateAITaskSuggestions } from '../../lib/ai';
 import { resolveWithDemoFallback } from '../../lib/dataPolicy';
 import { getStoredUserId } from '../../lib/authGuard';
 import { syncRoleNotifications } from '../../lib/careNotifications';
+import { upsertAshaComplianceLog } from '../../lib/gigCompliance';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
+import { FieldRouteMap } from '../../components/FieldRouteMap';
 
 const HEALTH_TIPS = [
   { id: 1, title: 'Pregnancy Care', desc: 'Regular check-ups & nutrition', color: '#0891b2', bg: '#e0f2fe' },
@@ -115,6 +121,12 @@ export default function HomeScreen() {
     setPatientCount(resolveWithDemoFallback(p, ALL_PATIENTS).length);
     if (ashaId) {
       syncRoleNotifications(ashaId, 'asha').catch(() => undefined);
+      upsertAshaComplianceLog({
+        ashaId,
+        tasksCompleted: t.filter((task) => task.priority === 'urgent').length,
+        visitsCompleted: resolveWithDemoFallback(p, ALL_PATIENTS).length,
+        hoursLogged: Math.min(8, resolveWithDemoFallback(p, ALL_PATIENTS).length * 0.25),
+      }).catch(() => undefined);
     }
     setLoading(false);
   };
@@ -151,16 +163,19 @@ export default function HomeScreen() {
             {role === 'doctor' ? 'Dr. Anjali Desai 👋' : 'Sunita Sharma 👋'}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.bellContainer}
-          onPress={() => Alert.alert('Notifications', 'You have 3 new notifications')}>
-          <Bell size={22} color="#0f172a" />
-          {notifCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{notifCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <SyncStatusDot accentColor={Colors.primary} />
+          <TouchableOpacity
+            style={styles.bellContainer}
+            onPress={() => Alert.alert('Notifications', 'You have 3 new notifications')}>
+            <Bell size={22} color="#0f172a" />
+            {notifCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{notifCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Community Health Signals Card */}
@@ -187,6 +202,30 @@ export default function HomeScreen() {
           <TrendingUp size={20} color="#fff" />
           <Text style={styles.statNum}>{role === 'doctor' ? '893' : '3L'}</Text>
           <Text style={styles.statLabel}>{role === 'doctor' ? 'Hours' : 'Water Target'}</Text>
+        </View>
+      </View>
+
+      {/* Field route */}
+      <View style={styles.section}>
+        <FieldRouteMap />
+      </View>
+
+      {/* Quick Tools */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Quick Tools</Text>
+        <View style={styles.quickToolsRow}>
+          <TouchableOpacity style={styles.quickTool} onPress={() => router.push('/(asha)/services')}>
+            <BriefcaseMedical size={20} color="#d97706" />
+            <Text style={styles.quickToolText}>Services</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickTool} onPress={() => router.push('/(asha)/vaccinations')}>
+            <Syringe size={20} color="#7c3aed" />
+            <Text style={styles.quickToolText}>Vaccines</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickTool} onPress={() => router.push('/(asha)/add-patient')}>
+            <UserPlus size={20} color="#0891b2" />
+            <Text style={styles.quickToolText}>Add Patient</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -328,6 +367,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   greeting: {
     fontFamily: Fonts.regular,
     fontSize: 14,
@@ -436,6 +476,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.textPrimary,
     marginBottom: 12,
+  },
+  quickToolsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  quickTool: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  quickToolText: {
+    fontFamily: Fonts.semiBold,
+    fontSize: 11,
+    color: Colors.textPrimary,
+    textAlign: 'center',
   },
   alertCountBadge: {
     backgroundColor: Colors.danger,

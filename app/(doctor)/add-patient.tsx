@@ -7,6 +7,8 @@ import { useRouter } from 'expo-router';
 // @ts-ignore
 import { UserPlus, User, Hash, AlertTriangle, ArrowLeft } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { addPatient } from '../../lib/api';
+import { mapPatientToDbInsert } from '../../lib/patientMapper';
 import { supabase } from '../../lib/supabase';
 
 export default function DoctorAddPatientScreen() {
@@ -29,20 +31,24 @@ export default function DoctorAddPatientScreen() {
             const { data: userData } = await supabase.auth.getUser();
             const doctorId = userData?.user?.id;
 
-            const newPatientData = {
-                id: crypto.randomUUID(),
-                name,
-                age: parseInt(age),
-                gender: gender || 'Not Specified',
-                condition,
-                status: 'Active',
-                risk_level: 'Medium',
-                phone: phone,
-                image_url: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70),
-                assigned_doctor_id: doctorId,
-            };
+            const newPatientData = mapPatientToDbInsert(
+                {
+                    name,
+                    age: parseInt(age, 10),
+                    condition,
+                    phone,
+                    image: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70)}`,
+                    status: 'Active',
+                    riskLevel: 'Medium',
+                },
+                {
+                    id: crypto.randomUUID(),
+                    gender: gender || 'Not Specified',
+                    assigned_doctor_id: doctorId,
+                }
+            );
 
-            const { error } = await supabase.from('patients').insert([newPatientData]);
+            const { error } = await addPatient(newPatientData);
 
             if (error) throw error;
 

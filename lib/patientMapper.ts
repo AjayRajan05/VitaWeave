@@ -1,4 +1,4 @@
-import type { Patient, PatientStatus, RiskLevel } from '../app/constants/data';
+import type { Patient, PatientStatus, RiskLevel } from '../app/_constants/data';
 
 function formatFollowUpDue(dueDate?: string | null, urgent?: boolean): string {
   if (!dueDate) return urgent ? 'Follow-up overdue' : 'No follow-up scheduled';
@@ -24,6 +24,13 @@ function formatLastVisit(value?: string | null): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+const DEFAULT_PATIENT_AVATAR =
+  'https://images.unsplash.com/photo-1537368910025-700350f59c05?q=80&w=200&auto=format&fit=crop';
+
+export function getPatientAvatarUri(image?: string | null): string {
+  return image?.trim() ? image.trim() : DEFAULT_PATIENT_AVATAR;
+}
+
 export function mapDbPatient(row: Record<string, unknown>): Patient {
   const status = (row.status as PatientStatus) ?? 'Stable';
   const riskLevel = (row.risk_level as RiskLevel) ?? 'Low';
@@ -37,9 +44,11 @@ export function mapDbPatient(row: Record<string, unknown>): Patient {
     status,
     riskLevel,
     phone: String(row.phone ?? ''),
-    image: String(row.image_url ?? ''),
+    image: getPatientAvatarUri(row.image_url as string | null),
     followUpDue: formatFollowUpDue(row.follow_up_due as string | null, Boolean(row.follow_up_urgent)),
     followUpUrgent: Boolean(row.follow_up_urgent),
+    urgencyScore: Number(row.urgency_score ?? 0),
+    ward: row.ward as string | undefined,
   };
 }
 

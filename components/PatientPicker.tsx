@@ -9,7 +9,7 @@ import {
   TextInput,
   ActivityIndicator,
 } from 'react-native';
-import type { Patient } from '../app/constants/data';
+import type { Patient } from '../app/_constants/data';
 
 type PatientPickerProps = {
   patients: Patient[];

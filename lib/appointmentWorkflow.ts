@@ -1,6 +1,6 @@
 import { updateAppointmentStatus, logVideoCallSession } from './api';
 import { generateChannelName } from './agora';
-import type { AppointmentRecord } from '../app/constants/data';
+import type { AppointmentRecord } from '../app/_constants/data';
 
 export type TelemedicineSession = {
   appointmentId: string;

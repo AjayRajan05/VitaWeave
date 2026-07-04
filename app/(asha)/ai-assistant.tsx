@@ -13,8 +13,8 @@ import {
   Alert,
 } from 'react-native';
 import { Send, Bot, User, MessageSquare, BarChart2, ChevronRight, Mic, MicOff, Key } from 'lucide-react-native';
-import { Colors, Fonts, getRiskColors } from '../constants/theme';
-import { AI_INSIGHTS, type AIInsight, type Patient } from '../constants/data';
+import { Colors, Fonts, getRiskColors } from '../_constants/theme';
+import { AI_INSIGHTS, type AIInsight, type Patient } from '../_constants/data';
 import { useCareTeamPatients } from '../../hooks/useCareTeamPatients';
 import { getAIInsights } from '../../lib/api';
 import { generateCaseSummary } from '../../lib/logic';
@@ -108,9 +108,22 @@ export default function AIAssistantScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    loadInsights();
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      const data = await getAIInsights();
+      if (cancelled) return;
+      if (data.length > 0) setInsights(data);
+      setLoading(false);
+    })();
+
     checkApiKey();
     loadPersistedChat();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadPersistedChat = async () => {
@@ -150,13 +163,6 @@ export default function AIAssistantScreen() {
       setApiKey(tempKey.trim());
       setShowKeyModal(false);
     }
-  };
-
-  const loadInsights = async () => {
-    setLoading(true);
-    const data = await getAIInsights();
-    if (data.length > 0) setInsights(data);
-    setLoading(false);
   };
 
   const sendMessage = useCallback(() => {

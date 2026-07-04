@@ -32,10 +32,9 @@ export class EnvValidator {
     const missingVars: string[] = [];
     const invalidVars: string[] = [];
 
-    // Check required variables
     for (const varName of this.REQUIRED_VARS) {
       const value = process.env[varName];
-      
+
       if (!value) {
         missingVars.push(varName);
       } else if (this.isInvalidValue(varName, value)) {
@@ -43,15 +42,8 @@ export class EnvValidator {
       }
     }
 
-    // Check recommended variables (warn in logs only)
-    for (const varName of this.RECOMMENDED_VARS) {
-      const value = process.env[varName];
-      if (value && this.isInvalidValue(varName, value)) {
-        invalidVars.push(`${varName} (invalid format)`);
-      }
-    }
+    // Recommended vars are validated separately — they must not block app startup.
 
-    // Check optional variables format
     for (const varName of this.OPTIONAL_VARS) {
       const value = process.env[varName];
       if (value && this.isInvalidValue(varName, value)) {
@@ -64,6 +56,22 @@ export class EnvValidator {
       missingVars,
       invalidVars,
     };
+  }
+
+  /** Returns warnings for recommended vars that are missing or malformed. */
+  static getRecommendedWarnings(): string[] {
+    const warnings: string[] = [];
+
+    for (const varName of this.RECOMMENDED_VARS) {
+      const value = process.env[varName];
+      if (!value) {
+        warnings.push(`${varName} is not set (some features may be limited)`);
+      } else if (this.isInvalidValue(varName, value)) {
+        warnings.push(`${varName} has an invalid format`);
+      }
+    }
+
+    return warnings;
   }
 
   private static isInvalidValue(varName: string, value: string): boolean {
@@ -81,7 +89,8 @@ export class EnvValidator {
         return value.length < 10;
       
       case 'EXPO_PUBLIC_AGORA_APP_ID':
-        return !/^\d+$/.test(value);
+        // Agora App IDs are public alphanumeric strings (commonly 32-char hex)
+        return !/^[a-zA-Z0-9_-]{8,64}$/.test(value);
       
       case 'EXPO_PUBLIC_AGORA_TOKEN':
         return value.length < 20;

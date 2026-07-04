@@ -5,7 +5,7 @@ import { Plus, Megaphone, MapPin, Users, Calendar, ChevronLeft } from 'lucide-re
 import { useRouter, useFocusEffect } from 'expo-router';
 import { getCampaigns } from '../../lib/api';
 import { formatCampaignDate } from '../../lib/formatters';
-import type { CampaignRecord } from '../constants/data';
+import type { CampaignRecord } from '../_constants/data';
 
 export default function CampaignPlannerScreen() {
     const router = useRouter();

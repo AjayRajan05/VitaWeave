@@ -19,11 +19,20 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error(errorMessage);
 }
 
-// Additional validation
+// Additional validation (required vars only)
 const envValidation = EnvValidator.validateEnvironment();
 if (!envValidation.isValid) {
+    const details = [
+        ...envValidation.missingVars.map((v) => `Missing: ${v}`),
+        ...envValidation.invalidVars.map((v) => `Invalid: ${v}`),
+    ].join('; ');
     logger.error('Environment validation failed:', envValidation);
-    throw new Error('Invalid environment configuration. Check your .env file.');
+    throw new Error(`Invalid environment configuration. ${details}`);
+}
+
+const recommendedWarnings = EnvValidator.getRecommendedWarnings();
+for (const warning of recommendedWarnings) {
+    logger.warn(warning);
 }
 
 logger.info('Supabase client initialized successfully');

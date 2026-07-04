@@ -10,7 +10,7 @@ import { getStoredUserId } from '../../lib/authGuard';
 import { queueFollowUpTaskAfterVisit } from '../../lib/clinicalWorkflow';
 import { PatientPicker } from '../../components/PatientPicker';
 import { useCareTeamPatients } from '../../hooks/useCareTeamPatients';
-import type { Patient } from '../constants/data';
+import type { Patient } from '../_constants/data';
 
 export default function RecordVisitScreen() {
     const router = useRouter();
@@ -51,7 +51,7 @@ export default function RecordVisitScreen() {
         setLoading(false);
 
         if (error) {
-            Alert.alert('Save Failed', error.message || 'Could not save medical record.');
+            Alert.alert('Save Failed', error instanceof Error ? error.message : 'Could not save medical record.');
             return;
         }
 
@@ -82,6 +82,20 @@ export default function RecordVisitScreen() {
                 label="Patient"
                 placeholder="Search and select patient"
             />
+
+            {selectedPatient && (
+                <TouchableOpacity
+                    style={styles.referBtn}
+                    onPress={() =>
+                        router.push({
+                            pathname: '/(doctor)/refer-patient',
+                            params: { patientId: selectedPatient.id, patientName: selectedPatient.name },
+                        } as any)
+                    }
+                >
+                    <Text style={styles.referBtnText}>Refer {selectedPatient.name}</Text>
+                </TouchableOpacity>
+            )}
 
             <Text style={styles.label}>Diagnosis *</Text>
             <TextInput style={styles.input} value={diagnosis} onChangeText={setDiagnosis} />
@@ -131,6 +145,15 @@ const styles = StyleSheet.create({
         fontSize: 15,
     },
     multiline: { minHeight: 88, textAlignVertical: 'top' },
+    referBtn: {
+        marginTop: 12,
+        paddingVertical: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#0891b2',
+        alignItems: 'center',
+    },
+    referBtnText: { fontFamily: 'Inter-SemiBold', fontSize: 14, color: '#0891b2' },
     saveBtn: {
         flexDirection: 'row',
         alignItems: 'center',

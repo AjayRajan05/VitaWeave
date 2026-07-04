@@ -7,7 +7,6 @@
     "icon": "./assests/icon.png",
     "scheme": "vitaweave",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.vitaweave.app",
@@ -42,6 +41,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-speech-recognition",
       [
         "expo-camera",
         {

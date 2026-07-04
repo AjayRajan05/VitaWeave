@@ -1,4 +1,4 @@
-import type { CommunityAlert, RiskLevel } from '../app/constants/data';
+import type { CommunityAlert, RiskLevel } from '../app/_constants/data';
 
 const RISK_RANK: Record<string, number> = {
   Low: 1,

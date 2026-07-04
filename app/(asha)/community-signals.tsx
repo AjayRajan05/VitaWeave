@@ -10,14 +10,14 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, Radio, Activity } from 'lucide-react-native';
-import { Colors, Fonts, getRiskColors } from '../constants/theme';
+import { Colors, Fonts, getRiskColors } from '../_constants/theme';
 import {
     PHARMACY_TRENDS,
     SYMPTOM_REPORTS,
     COMMUNITY_ALERTS,
     WEEKLY_TRENDS,
     COMMUNITY_RISK_LEVEL,
-} from '../constants/data';
+} from '../_constants/data';
 import {
     getCommunityAlerts,
     getPharmacyTrends,

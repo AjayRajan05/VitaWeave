@@ -22,7 +22,7 @@ export function isUserRole(value: string | null | undefined): value is UserRole 
   return normalizeRole(value) !== null;
 }
 
-export function roleRoute(role: UserRole): '/(asha)' | '/(doctor)' | '/(patient)' {
+export function roleRoute(role: UserRole): '/(asha)' | '/(doctor)' | '/(patient)' | '/(admin)' {
   switch (role) {
     case 'asha':
       return '/(asha)';
@@ -30,12 +30,16 @@ export function roleRoute(role: UserRole): '/(asha)' | '/(doctor)' | '/(patient)
       return '/(doctor)';
     case 'patient':
       return '/(patient)';
+    case 'admin':
+      return '/(admin)';
     default:
       return '/(asha)';
   }
 }
 
-export function roleLoginPath(role: UserRole): '/asha-login' | '/doctor-login' | '/patient-login' {
+export function roleLoginPath(
+  role: UserRole
+): '/asha-login' | '/doctor-login' | '/patient-login' | '/admin-login' {
   switch (role) {
     case 'asha':
       return '/asha-login';
@@ -43,6 +47,8 @@ export function roleLoginPath(role: UserRole): '/asha-login' | '/doctor-login' |
       return '/doctor-login';
     case 'patient':
       return '/patient-login';
+    case 'admin':
+      return '/admin-login';
     default:
       return '/asha-login';
   }

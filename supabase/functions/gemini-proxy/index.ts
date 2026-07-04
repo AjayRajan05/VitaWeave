@@ -44,7 +44,7 @@ serve(async (req) => {
       });
     }
 
-    const { prompt, context } = await req.json();
+    const { prompt, context, language } = await req.json();
     if (!prompt || typeof prompt !== 'string') {
       return new Response(JSON.stringify({ error: 'prompt is required' }), {
         status: 400,
@@ -53,6 +53,7 @@ serve(async (req) => {
     }
 
     let fullPrompt = `${MEDGEMMA_SYSTEM_PROMPT}\n\n`;
+    if (language) fullPrompt += `${language}\n\n`;
     if (context) fullPrompt += `CONTEXT:\n${context}\n\n`;
     fullPrompt += `USER QUERY: ${prompt}`;
 

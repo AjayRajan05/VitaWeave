@@ -8,6 +8,7 @@ import {
 } from 'lucide-react-native';
 import { Platform, StyleSheet, useWindowDimensions, View, ActivityIndicator } from 'react-native';
 import { useRoleGuard } from '../../lib/authGuard';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
 
 export default function PatientTabLayout() {
     const { width } = useWindowDimensions();
@@ -36,6 +37,11 @@ export default function PatientTabLayout() {
                 tabBarLabelStyle: styles.tabBarLabel,
                 headerStyle: styles.header,
                 headerTitleStyle: styles.headerTitle,
+                headerRight: () => (
+                    <View style={styles.headerRight}>
+                        <SyncStatusDot accentColor="#059669" />
+                    </View>
+                ),
             }}>
             <Tabs.Screen
                 name="index"
@@ -103,4 +109,5 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#0f172a',
     },
+    headerRight: { marginRight: 14 },
 });

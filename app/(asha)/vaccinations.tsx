@@ -13,7 +13,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { getVaccinations, markVaccinationComplete } from '../../lib/api';
 import { getStoredUserId } from '../../lib/authGuard';
 import { resolveWithDemoFallback } from '../../lib/dataPolicy';
-import type { VaccinationRecord } from '../constants/data';
+import type { VaccinationRecord } from '../_constants/data';
 import { EmptyState } from '../../components/EmptyState';
 
 const DEMO_VACCINATIONS: VaccinationRecord[] = [

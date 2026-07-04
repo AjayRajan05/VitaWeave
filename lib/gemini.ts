@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from './logger';
 import { proxyGeminiRequest } from './edgeClient';
+import { geminiLanguageInstruction, getLocale } from './i18n';
 
 const MODEL_NAME = process.env.EXPO_PUBLIC_GEMINI_MODEL ?? 'gemini-1.5-flash';
 const API_KEY_STORAGE_KEY = 'gemini_api_key';
@@ -53,19 +54,20 @@ async function getMedGemmaResponseLocal(prompt: string, context?: string): Promi
 /**
  * Prefer secure Supabase Edge Function proxy; fall back to direct client call in dev.
  */
-export async function getMedGemmaResponse(prompt: string, context?: string): Promise<string> {
+export async function getMedGemmaResponse(prompt: string, context?: string, locale = getLocale()): Promise<string> {
+    const languageLine = geminiLanguageInstruction(locale);
     const useProxy = process.env.EXPO_PUBLIC_USE_EDGE_PROXY !== 'false';
 
     if (useProxy) {
         try {
-            return await proxyGeminiRequest({ prompt, context });
+            return await proxyGeminiRequest({ prompt, context, language: languageLine });
         } catch (error) {
             logger.warn('Gemini edge proxy unavailable, falling back to client key:', error);
         }
     }
 
     try {
-        return await getMedGemmaResponseLocal(prompt, context);
+        return await getMedGemmaResponseLocal(`${languageLine}\n\n${prompt}`, context);
     } catch (error: any) {
         logger.error('Gemini API Error:', error);
         return `⚠️ MedGemma Error: ${error.message || 'Unable to connect to AI service.'}`;

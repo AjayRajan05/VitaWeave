@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-    View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+    View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
 } from 'react-native';
 // @ts-ignore
 import {
@@ -15,7 +15,18 @@ import { syncRoleNotifications } from '../../lib/careNotifications';
 import { getUserProfile } from '../../lib/auth';
 import { formatAppointmentTime, isAppointmentToday } from '../../lib/formatters';
 import { summarizeCommunitySignals } from '../../lib/communityHealth';
-import type { CommunityAlert } from '../constants/data';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
+import { ListSkeleton } from '../../components/ListSkeleton';
+import type { CommunityAlert } from '../_constants/data';
+
+type QueueItem = {
+    id: string;
+    name: string;
+    time: string;
+    type: string;
+    risk: string;
+    urgencyScore: number;
+};
 
 function buildDoctorAlerts(
     patients: { riskLevel: string; name: string }[],
@@ -56,10 +67,29 @@ export default function DoctorDashboard() {
     const [todayCount, setTodayCount] = useState(0);
     const [patientCount, setPatientCount] = useState(0);
     const [campaignCount, setCampaignCount] = useState(0);
-    const [queue, setQueue] = useState<
-        { id: string; name: string; time: string; type: string; risk: string }[]
-    >([]);
+    const [queue, setQueue] = useState<QueueItem[]>([]);
     const [alerts, setAlerts] = useState<{ text: string; severity: 'high' | 'moderate' | 'low' }[]>([]);
+
+    const moveQueueUp = (id: string) => {
+        setQueue((prev) => {
+            const idx = prev.findIndex((q) => q.id === id);
+            if (idx <= 0) return prev;
+            const next = [...prev];
+            [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+            return next;
+        });
+    };
+
+    const onQueueLongPress = (item: QueueItem) => {
+        Alert.alert(item.name, undefined, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Move up', onPress: () => moveQueueUp(item.id) },
+            {
+                text: 'See now',
+                onPress: () => router.push({ pathname: '/(doctor)/appointments', params: { focusId: item.id } }),
+            },
+        ]);
+    };
 
     const loadDashboard = useCallback(async () => {
         setLoading(true);
@@ -77,18 +107,26 @@ export default function DoctorDashboard() {
 
             if (profile.data?.name) setDoctorName(profile.data.name);
 
-            const todayAppts = appointments.filter((a) => isAppointmentToday(a.appointmentTime));
+            const todayAppts = appointments
+                .filter((a) => isAppointmentToday(a.appointmentTime))
+                .sort((a, b) => {
+                    const u = (b.patientUrgencyScore ?? 0) - (a.patientUrgencyScore ?? 0);
+                    if (u !== 0) return u;
+                    return new Date(a.appointmentTime).getTime() - new Date(b.appointmentTime).getTime();
+                });
+
             setTodayCount(todayAppts.length);
             setCampaignCount(campaigns.length);
             setPatientCount(patients.length);
 
             setQueue(
-                todayAppts.slice(0, 4).map((a) => ({
+                todayAppts.slice(0, 6).map((a) => ({
                     id: a.id,
                     name: a.patientName ?? 'Patient',
                     time: formatAppointmentTime(a.appointmentTime),
                     type: a.title,
                     risk: (a.patientRiskLevel ?? 'low').toLowerCase(),
+                    urgencyScore: a.patientUrgencyScore ?? 0,
                 }))
             );
             setAlerts(buildDoctorAlerts(patients, communityAlerts, campaigns.length));
@@ -114,7 +152,7 @@ export default function DoctorDashboard() {
     if (loading) {
         return (
             <View style={styles.loadingWrap}>
-                <ActivityIndicator size="large" color="#0891b2" />
+                <ListSkeleton rows={6} />
             </View>
         );
     }
@@ -127,10 +165,12 @@ export default function DoctorDashboard() {
                     <Text style={styles.greeting}>Good Morning,</Text>
                     <Text style={styles.doctorName}>{doctorName}</Text>
                 </View>
-                <TouchableOpacity style={styles.notifBtn}>
-                    <BellDot size={22} color="#0891b2" />
-                    <View style={styles.badge} />
-                </TouchableOpacity>
+                <View style={styles.headerRight}>
+                    <SyncStatusDot accentColor="#0891b2" />
+                    <TouchableOpacity style={styles.notifBtn}>
+                        <BellDot size={22} color="#0891b2" />
+                    </TouchableOpacity>
+                </View>
             </Animated.View>
 
             {/* Stats */}
@@ -190,7 +230,10 @@ export default function DoctorDashboard() {
             {/* Today's Queue */}
             <Animated.View entering={FadeInDown.delay(500).duration(500)}>
                 <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Patient Queue</Text>
+                    <View>
+                        <Text style={styles.sectionTitle}>Patient Queue</Text>
+                        <Text style={styles.queueHint}>SORTED BY URGENCY SCORE</Text>
+                    </View>
                     <TouchableOpacity onPress={() => router.push('/(doctor)/appointments')}>
                         <Text style={styles.seeAll}>See All</Text>
                     </TouchableOpacity>
@@ -199,16 +242,21 @@ export default function DoctorDashboard() {
                     <Text style={styles.emptyText}>No patients in today's queue.</Text>
                 ) : (
                 queue.map((appt) => (
-                    <TouchableOpacity key={appt.id} style={styles.apptCard}>
+                    <TouchableOpacity
+                        key={appt.id}
+                        style={styles.apptCard}
+                        onLongPress={() => onQueueLongPress(appt)}
+                        onPress={() => router.push('/(doctor)/appointments')}
+                    >
                         <View style={[
                             styles.riskDot,
-                            appt.risk === 'high' && { backgroundColor: '#dc2626' },
-                            (appt.risk === 'medium' || appt.risk === 'moderate') && { backgroundColor: '#d97706' },
-                            appt.risk === 'low' && { backgroundColor: '#059669' },
+                            appt.urgencyScore >= 80 && { backgroundColor: '#dc2626' },
+                            appt.urgencyScore >= 50 && appt.urgencyScore < 80 && { backgroundColor: '#d97706' },
+                            appt.urgencyScore < 50 && { backgroundColor: '#059669' },
                         ]} />
                         <View style={{ flex: 1 }}>
                             <Text style={styles.apptName}>{appt.name}</Text>
-                            <Text style={styles.apptType}>{appt.type}</Text>
+                            <Text style={styles.apptType}>{appt.type} · score {appt.urgencyScore}</Text>
                         </View>
                         <View style={styles.apptTimeWrap}>
                             <Clock size={14} color="#94a3b8" />
@@ -218,6 +266,28 @@ export default function DoctorDashboard() {
                     </TouchableOpacity>
                 ))
                 )}
+            </Animated.View>
+
+            {/* Quick Actions */}
+            <Animated.View entering={FadeInDown.delay(550).duration(500)} style={styles.quickActions}>
+                <Text style={styles.sectionTitle}>Quick Actions</Text>
+                <View style={styles.quickActionsRow}>
+                    <TouchableOpacity style={styles.quickActionBtn} onPress={() => router.push('/(doctor)/record-visit')}>
+                        <Text style={styles.quickActionText}>Record Visit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.quickActionBtn} onPress={() => router.push('/(doctor)/referrals' as any)}>
+                        <Text style={styles.quickActionText}>Referrals</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.quickActionBtn} onPress={() => router.push('/(doctor)/campaigns')}>
+                        <Text style={styles.quickActionText}>Campaigns</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.quickActionBtn} onPress={() => router.push('/(doctor)/telemedicine')}>
+                        <Text style={styles.quickActionText}>Telemedicine</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.quickActionBtn} onPress={() => router.push('/(doctor)/add-patient')}>
+                        <Text style={styles.quickActionText}>Add Patient</Text>
+                    </TouchableOpacity>
+                </View>
             </Animated.View>
 
             {/* Performance */}
@@ -252,6 +322,8 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
     content: { padding: 20, paddingBottom: 40 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    queueHint: { fontFamily: 'Inter-Regular', fontSize: 10, color: '#94a3b8', letterSpacing: 0.5, marginTop: 2 },
     greeting: { fontFamily: 'Inter-Regular', fontSize: 14, color: '#64748b' },
     doctorName: { fontFamily: 'Inter-Bold', fontSize: 24, color: '#0f172a' },
     notifBtn: {
@@ -306,6 +378,12 @@ const styles = StyleSheet.create({
     apptType: { fontFamily: 'Inter-Regular', fontSize: 12, color: '#94a3b8', marginTop: 2 },
     apptTimeWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     apptTime: { fontFamily: 'Inter-Medium', fontSize: 12, color: '#64748b' },
+    quickActions: { marginTop: 8, marginBottom: 8 },
+    quickActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    quickActionBtn: {
+        backgroundColor: '#e0f2fe', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+    },
+    quickActionText: { fontFamily: 'Inter-SemiBold', fontSize: 12, color: '#0891b2' },
     perfCard: {
         backgroundColor: '#fff', borderRadius: 16, padding: 18, marginTop: 16,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 },

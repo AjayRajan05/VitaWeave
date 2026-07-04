@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { ChevronLeft, TrendingUp, TrendingDown, AlertCircle, Pill, Activity } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { getPharmacyTrends, getSymptomReports, getCommunityAlerts } from '../../lib/api';
-import type { PharmacyTrend, SymptomReport, CommunityAlert } from '../constants/data';
+import type { PharmacyTrend, SymptomReport, CommunityAlert } from '../_constants/data';
 
 export default function InsightsScreen() {
     const router = useRouter();

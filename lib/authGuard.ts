@@ -1,23 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
-import { getCurrentUser, getUserProfile } from './auth';
+import { getCurrentUser, getUserProfile, ensureUserProfile } from './auth';
 import { isDevModeEnabled } from './devMode';
 import { normalizeRole, type UserRole } from './roles';
+import {
+  persistSession,
+  clearSessionStorage,
+  getStoredUserId as readStoredUserId,
+  getStoredRole,
+} from './sessionStorage';
 
-const USER_ROLE_KEY = 'user_role';
-const USER_ID_KEY = 'user_id';
-
-export async function persistSession(role: UserRole, userId?: string): Promise<void> {
-  await AsyncStorage.setItem(USER_ROLE_KEY, role);
-  if (userId) {
-    await AsyncStorage.setItem(USER_ID_KEY, userId);
-  }
-}
+export { persistSession };
 
 export async function clearSession(): Promise<void> {
-  await AsyncStorage.multiRemove([USER_ROLE_KEY, USER_ID_KEY]);
+  await clearSessionStorage();
   await supabase.auth.signOut();
 }
 
@@ -30,7 +27,7 @@ export async function verifyRoleAccess(requiredRole: UserRole): Promise<{
 
   if (!user) {
     if (isDevModeEnabled()) {
-      const storedRole = await AsyncStorage.getItem(USER_ROLE_KEY);
+      const storedRole = await getStoredRole();
       if (storedRole === requiredRole) {
         return { allowed: true };
       }
@@ -38,7 +35,13 @@ export async function verifyRoleAccess(requiredRole: UserRole): Promise<{
     return { allowed: false, reason: 'not_authenticated' };
   }
 
-  const { data: profile, error } = await getUserProfile(user.id);
+  let { data: profile, error } = await getUserProfile(user.id);
+  if (error || !profile) {
+    const repaired = await ensureUserProfile(user, requiredRole);
+    profile = repaired.data;
+    error = repaired.error;
+  }
+
   if (error || !profile) {
     return { allowed: false, reason: 'profile_missing' };
   }
@@ -85,7 +88,7 @@ export function useRoleGuard(requiredRole: UserRole) {
 }
 
 export async function getStoredUserId(): Promise<string | null> {
-  const fromStorage = await AsyncStorage.getItem(USER_ID_KEY);
+  const fromStorage = await readStoredUserId();
   if (fromStorage) return fromStorage;
 
   const user = await getCurrentUser();

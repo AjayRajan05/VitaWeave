@@ -15,8 +15,8 @@ import {
 } from 'react-native';
 // @ts-ignore
 import { Search, Filter, Phone, X, TriangleAlert as AlertTriangle, Clock, UserPlus } from 'lucide-react-native';
-import { Colors, Fonts, getRiskColors } from '../constants/theme';
-import { ALL_PATIENTS, type Patient, type RiskLevel } from '../constants/data';
+import { Colors, Fonts, getRiskColors } from '../_constants/theme';
+import { ALL_PATIENTS, type Patient, type RiskLevel } from '../_constants/data';
 import { runPatientTriage } from '../../lib/clinicalWorkflow';
 import { useCareTeamPatients } from '../../hooks/useCareTeamPatients';
 import { useRouter } from 'expo-router';
@@ -30,8 +30,17 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 type FilterMode = 'All' | RiskLevel;
 
 import { generateCaseSummary, getRecommendedServices } from '../../lib/logic';
+import { logAuditEvent } from '../../lib/auditLog';
 
-function PatientDetailModal({ patient, onClose }: { patient: Patient; onClose: () => void }) {
+function PatientDetailModal({
+  patient,
+  onClose,
+  onRefer,
+}: {
+  patient: Patient;
+  onClose: () => void;
+  onRefer: () => void;
+}) {
   const riskColors = getRiskColors(patient.riskLevel);
   const statusColors = STATUS_COLORS[patient.status] || STATUS_COLORS.Stable;
   const summary = useMemo(() => generateCaseSummary(patient), [patient]);
@@ -60,6 +69,11 @@ function PatientDetailModal({ patient, onClose }: { patient: Patient; onClose: (
             <View style={[modal.badge, { backgroundColor: riskColors.bg }]}>
               <Text style={[modal.badgeText, { color: riskColors.text }]}>{patient.riskLevel} Risk</Text>
             </View>
+            {patient.urgencyScore != null && (
+              <View style={[modal.badge, { backgroundColor: '#f1f5f9' }]}>
+                <Text style={[modal.badgeText, { color: '#475569' }]}>Score {patient.urgencyScore}</Text>
+              </View>
+            )}
           </View>
 
           {/* AI Summary Section */}
@@ -96,6 +110,10 @@ function PatientDetailModal({ patient, onClose }: { patient: Patient; onClose: (
               Follow-up: {patient.followUpDue}
             </Text>
           </View>
+
+          <TouchableOpacity style={modal.referBtn} onPress={onRefer}>
+            <Text style={modal.referBtnText}>Refer to facility</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={modal.callBtn}
@@ -145,14 +163,16 @@ export default function PatientsScreen() {
     if (filterMode !== 'All') {
       list = list.filter((p) => p.riskLevel === filterMode);
     }
-    if (!searchText.trim()) return list;
-    const q = searchText.toLowerCase();
-    return list.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.condition.toLowerCase().includes(q) ||
-        p.status.toLowerCase().includes(q)
-    );
+    if (searchText.trim()) {
+      const q = searchText.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.condition.toLowerCase().includes(q) ||
+          p.status.toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => (b.urgencyScore ?? 0) - (a.urgencyScore ?? 0));
   }, [patients, searchText, filterMode]);
 
   const filterOptions: FilterMode[] = ['All', 'High', 'Medium', 'Low'];
@@ -241,7 +261,14 @@ export default function PatientsScreen() {
                     styles.patientCard,
                     isLargeScreen ? styles.patientCardLarge : styles.patientCardMobile,
                   ]}
-                  onPress={() => setSelectedPatient(patient)}>
+                  onPress={() => {
+                    setSelectedPatient(patient);
+                    logAuditEvent({
+                      action: 'read',
+                      resourceType: 'patient',
+                      resourceId: patient.id,
+                    }).catch(() => undefined);
+                  }}>
                   <Image source={{ uri: patient.image }} style={styles.patientImage} />
                   <View style={styles.patientInfo}>
                     <View style={styles.patientNameRow}>
@@ -293,6 +320,14 @@ export default function PatientsScreen() {
         <PatientDetailModal
           patient={selectedPatient}
           onClose={() => setSelectedPatient(null)}
+          onRefer={() => {
+            const p = selectedPatient;
+            setSelectedPatient(null);
+            router.push({
+              pathname: '/(asha)/refer-patient',
+              params: { patientId: p.id, patientName: p.name },
+            } as any);
+          }}
         />
       )}
     </View>
@@ -502,6 +537,16 @@ const modal = StyleSheet.create({
     marginBottom: 16,
   },
   followUpText: { fontFamily: Fonts.semiBold, fontSize: 13 },
+  referBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  referBtnText: { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.primary },
   callBtn: {
     flexDirection: 'row',
     alignItems: 'center',

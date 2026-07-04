@@ -27,12 +27,12 @@ import {
   Heart,
   Zap,
 } from 'lucide-react-native';
-import { Colors, Fonts } from '../constants/theme';
+import { Colors, Fonts } from '../_constants/theme';
 import { useRouter } from 'expo-router';
 import { useUserProfile } from '../../hooks/useUserProfile';
+import { LanguagePicker } from '../../components/LanguagePicker';
+import { setLocaleFromProfile } from '../../lib/i18n';
 import type { AshaProfileStats } from '../../lib/profileStats';
-
-type Lang = 'English' | 'हिंदी';
 
 const MENU_ITEMS = [
   { id: 1, title: 'Settings', titleHi: 'सेटिंग्स', icon: Settings2, danger: false },
@@ -46,7 +46,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isLargeScreen = width >= 768;
-  const [lang, setLang] = useState<Lang>('English');
+  const [langOpen, setLangOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -56,7 +56,7 @@ export default function ProfileScreen() {
   const ashaStats = stats as AshaProfileStats | null;
   const synced = true;
 
-  const hi = lang === 'हिंदी';
+  const hi = profile?.language === 'Hindi' || profile?.language === 'हिंदी';
 
   const openEdit = () => {
     setName(profile?.name ?? '');
@@ -94,8 +94,7 @@ export default function ProfileScreen() {
         ]
       );
     } else if (item.title === 'Language') {
-      setLang((prev) => (prev === 'English' ? 'हिंदी' : 'English'));
-      Alert.alert('Language', `Switched to ${lang === 'English' ? 'हिंदी' : 'English'}`);
+      setLangOpen(true);
     } else {
       Alert.alert(item.title, `Opening ${item.title}...`);
     }
@@ -237,7 +236,7 @@ export default function ProfileScreen() {
             <View style={styles.menuItemRight}>
               {item.title === 'Language' && (
                 <View style={styles.langBadge}>
-                  <Text style={styles.langBadgeText}>{lang}</Text>
+                  <Text style={styles.langBadgeText}>{profile?.language ?? 'English'}</Text>
                 </View>
               )}
               {item.title === 'Notifications' && notificationCount > 0 && (
@@ -267,6 +266,20 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      <LanguagePicker
+        visible={langOpen}
+        currentLanguage={profile?.language}
+        onClose={() => setLangOpen(false)}
+        onSelect={async (language) => {
+          const { error } = await saveProfile({ language });
+          if (error) {
+            Alert.alert(hi ? 'त्रुटि' : 'Update failed', (error as Error).message ?? 'Could not save language');
+            return;
+          }
+          await setLocaleFromProfile(language);
+        }}
+      />
 
       <Text style={styles.version}>VitaWeave v2.0 · {hi ? 'ASHA कार्यकर्ताओं के लिए' : 'Built for ASHA Workers'}</Text>
     </ScrollView>

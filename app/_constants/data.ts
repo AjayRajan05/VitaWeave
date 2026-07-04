@@ -17,6 +17,8 @@ export type Patient = {
     image: string;
     followUpDue: string;   // e.g. "Overdue: 8 days" | "Due in 3 days"
     followUpUrgent: boolean;
+    urgencyScore?: number;
+    ward?: string;
 };
 
 export type CommunityAlert = {
@@ -99,6 +101,23 @@ export type AppointmentRecord = {
     patientName?: string;
     doctorName?: string;
     patientRiskLevel?: string;
+    patientUrgencyScore?: number;
+};
+
+export type ReferralRecord = {
+    id: string;
+    patientId: string;
+    patientName?: string;
+    referredBy: string;
+    referredToType: 'phc' | 'hospital' | 'telemedicine' | 'specialist';
+    referredToName?: string;
+    reason: string;
+    urgency: 'routine' | 'urgent' | 'emergency';
+    status: 'pending' | 'acknowledged' | 'in_progress' | 'completed' | 'declined';
+    createdAt: string;
+    acknowledgedAt?: string;
+    completedAt?: string;
+    outcomeNotes?: string;
 };
 
 export type CampaignRecord = {
@@ -126,6 +145,26 @@ export type PatientMedication = {
     id: number;
     name: string;
     schedule: string;
+    takenToday: boolean;
+};
+
+export type MedicationReminder = {
+    id: string;
+    patientId: string;
+    medicationName: string;
+    dosage?: string;
+    scheduleTimes: string[];
+    startDate: string;
+    endDate?: string;
+    active: boolean;
+};
+
+export type MedicationReminderDose = {
+    reminderId: string;
+    medicationName: string;
+    dosage?: string;
+    timeLabel: string;
+    timeKey: string;
     takenToday: boolean;
 };
 

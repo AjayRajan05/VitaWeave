@@ -9,6 +9,8 @@ import {
     Settings, Bell, Globe, LogOut, ChevronRight, ShieldCheck,
 } from 'lucide-react-native';
 import { useUserProfile } from '../../hooks/useUserProfile';
+import { LanguagePicker } from '../../components/LanguagePicker';
+import { setLocaleFromProfile } from '../../lib/i18n';
 import type { DoctorProfileStats } from '../../lib/profileStats';
 
 const MENU_ITEMS = [
@@ -28,6 +30,7 @@ export default function DoctorProfileScreen() {
     const [phone, setPhone] = useState('');
     const [ward, setWard] = useState('');
     const [saving, setSaving] = useState(false);
+    const [langOpen, setLangOpen] = useState(false);
 
     const openEdit = () => {
         setName(profile?.name ?? '');
@@ -127,7 +130,13 @@ export default function DoctorProfileScreen() {
             </View>
 
             {MENU_ITEMS.map(({ icon: Icon, label, color }) => (
-                <TouchableOpacity key={label} style={styles.menuItem}>
+                <TouchableOpacity
+                    key={label}
+                    style={styles.menuItem}
+                    onPress={() => {
+                        if (label === 'Language') setLangOpen(true);
+                    }}
+                >
                     <View style={[styles.menuIcon, { backgroundColor: color + '15' }]}>
                         <Icon size={18} color={color} />
                     </View>
@@ -162,6 +171,20 @@ export default function DoctorProfileScreen() {
                     </View>
                 </View>
             </Modal>
+
+            <LanguagePicker
+                visible={langOpen}
+                currentLanguage={profile?.language}
+                onClose={() => setLangOpen(false)}
+                onSelect={async (language) => {
+                    const { error } = await saveProfile({ language });
+                    if (error) {
+                        Alert.alert('Update failed', error instanceof Error ? error.message : 'Could not save language');
+                        return;
+                    }
+                    await setLocaleFromProfile(language);
+                }}
+            />
         </ScrollView>
     );
 }

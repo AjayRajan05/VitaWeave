@@ -63,6 +63,13 @@ Production should set `EXPO_PUBLIC_USE_EDGE_PROXY=true`.
 - Sentry DSN is public client key (standard pattern)
 - `beforeSend` hooks should strip PHI (extend in `lib/sentry.ts` as needed)
 
+### 7. Audit logging
+
+- `audit_log` — access events (login, patient record reads) via `lib/auditLog.ts`; queue-first for offline
+- `scoring_audit` — priority score changes after triage via `lib/scoringAudit.ts`
+- `asha_compliance_logs` — daily field activity summaries via `lib/gigCompliance.ts`
+- Supervisor role (`admin`) can read district metrics and audit tables (RLS in `003_tier3_compliance.sql`)
+
 ---
 
 ## Row Level Security model
@@ -73,6 +80,7 @@ Principles:
 2. **ASHA** — CRUD on assigned `patients`; read ward alerts/tasks
 3. **Doctor** — appointments where `doctor_id = auth.uid()`; patients in caseload
 4. **Patient** — rows where `profile_id = auth.uid()` or linked patient id
+5. **Admin** — read-only access to `district_metrics`, `audit_log`, `scoring_audit` (supervisor role)
 
 Audit: periodically run policy tests with three test JWTs.
 
@@ -89,13 +97,14 @@ Audit: periodically run policy tests with three test JWTs.
 | Data minimization | Only required fields in schema |
 | Security safeguards | RLS, encryption in transit, secret proxy |
 | Data principal rights | Manual export/delete via Supabase admin (automate in roadmap) |
+| ABHA health ID | M1: `patients.abha_id` storage + read-only UI; M2/M3 HIP/HIU deferred |
 
 ### HIPAA (US pilots)
 
 Would require:
 
 - BAA with Supabase (Teams/Enterprise)
-- Audit logging
+- Audit logging (`audit_log`, `scoring_audit` — implemented)
 - Access controls documentation
 - Breach notification procedures
 
@@ -153,7 +162,8 @@ If registering minors, parental consent flows are **not yet implemented** — re
 
 - [ ] `EXPO_PUBLIC_DEV_MODE=false` in production
 - [ ] Edge proxy enabled
-- [ ] RLS policies tested per role
+- [ ] RLS policies tested per role (including admin read-only)
+- [ ] Migrations `002` and `003` applied in production
 - [ ] Privacy policy URL live
 - [ ] Sentry PHI scrubbing verified
 - [ ] Penetration test or third-party security review

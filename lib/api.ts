@@ -18,129 +18,36 @@ import type {
     PatientVital,
     PatientMedication,
     RiskLevel,
-} from '../app/constants/data';
+} from '../app/_constants/data';
 
-const SYNC_QUEUE_STORAGE_KEY = '@vitaweave_sync_queue';
-const SYNC_SUBSCRIPTION_TABLES = ['patients', 'community_alerts', 'symptom_reports'];
+import {
+  syncQueue,
+  queueTableUpdate,
+  writeThroughQueue,
+} from './syncEngine';
+import { addPatientVitals } from './referralsApi';
+export { getPendingSyncCount, subscribeSyncStatus } from './syncEngine';
 
-type SyncAction = 'insert' | 'update' | 'delete';
-
-type SyncOperation = {
-    id: string;
-    table: string;
-    action: SyncAction;
-    recordId?: number | string;
-    payload: any;
-    timestamp: number;
-    conflictKey: string;
-};
+const SYNC_SUBSCRIPTION_TABLES = [
+    'patients',
+    'community_alerts',
+    'symptom_reports',
+    'referrals',
+    'medication_reminders',
+    'vaccinations',
+    'medical_records',
+    'dashboard_tasks',
+];
 
 function generateQueueId() {
     return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function getSyncQueue(): Promise<SyncOperation[]> {
-    try {
-        const raw = await AsyncStorage.getItem(SYNC_QUEUE_STORAGE_KEY);
-        if (!raw) return [];
-        return JSON.parse(raw) as SyncOperation[];
-    } catch (error) {
-        console.warn('Failed to read sync queue:', error);
-        return [];
+function newRecordId(): string {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return globalThis.crypto.randomUUID();
     }
-}
-
-async function setSyncQueue(queue: SyncOperation[]) {
-    try {
-        await AsyncStorage.setItem(SYNC_QUEUE_STORAGE_KEY, JSON.stringify(queue));
-    } catch (error) {
-        console.warn('Failed to persist sync queue:', error);
-    }
-}
-
-async function enqueueSyncOperation(operation: Omit<SyncOperation, 'id'>) {
-    const queue = await getSyncQueue();
-    queue.push({ id: generateQueueId(), ...operation });
-    await setSyncQueue(queue);
-}
-
-function getRowTimestamp(row: any): number {
-    if (!row) return 0;
-    const timestamp = row.updated_at || row.created_at;
-    return timestamp ? Date.parse(timestamp) : 0;
-}
-
-function mergeRemoteWithLocal(remote: any, localPayload: any, opTimestamp: number) {
-    const remoteTimestamp = getRowTimestamp(remote);
-    const merged = { ...remote };
-
-    for (const key of Object.keys(localPayload)) {
-        const localValue = localPayload[key];
-
-        if (remoteTimestamp > opTimestamp && remote[key] !== undefined && remote[key] !== localValue) {
-            continue;
-        }
-
-        merged[key] = localValue;
-    }
-
-    merged.updated_at = new Date(Math.max(remoteTimestamp, opTimestamp)).toISOString();
-    return merged;
-}
-
-async function processSyncOperation(operation: SyncOperation): Promise<boolean> {
-    try {
-        if (operation.action === 'insert') {
-            await supabase.from(operation.table).insert([operation.payload]);
-            return true;
-        }
-
-        if (operation.action === 'delete') {
-            if (operation.recordId === undefined) return true;
-            await supabase.from(operation.table).delete().eq('id', operation.recordId);
-            return true;
-        }
-
-        if (operation.action === 'update') {
-            if (operation.recordId === undefined) return true;
-
-            const { data: remoteRow, error: fetchError } = await supabase
-                .from(operation.table)
-                .select('*')
-                .eq('id', operation.recordId)
-                .single();
-
-            if (fetchError || !remoteRow) {
-                await supabase.from(operation.table).insert([{ id: operation.recordId, ...operation.payload }]);
-                return true;
-            }
-
-            const mergedPayload = mergeRemoteWithLocal(remoteRow, operation.payload, operation.timestamp);
-            await supabase.from(operation.table).upsert([mergedPayload], { onConflict: 'id' });
-            return true;
-        }
-
-        return false;
-    } catch (error) {
-        console.warn('Sync operation failed, will retry later:', operation, error);
-        return false;
-    }
-}
-
-export async function syncQueue(): Promise<void> {
-    const queue = await getSyncQueue();
-    if (!queue.length) return;
-
-    const nextQueue: SyncOperation[] = [];
-
-    for (const operation of queue) {
-        const success = await processSyncOperation(operation);
-        if (!success) {
-            nextQueue.push(operation);
-        }
-    }
-
-    await setSyncQueue(nextQueue);
+    return generateQueueId();
 }
 
 async function subscribeRealtimeTable(table: string) {
@@ -182,18 +89,7 @@ export async function initializeSync() {
     }
 }
 
-export async function queueTableUpdate(table: string, recordId: number | string, payload: any) {
-    await enqueueSyncOperation({
-        table,
-        action: 'update',
-        recordId,
-        payload,
-        timestamp: Date.now(),
-        conflictKey: `${table}:${recordId}`,
-    });
-
-    await syncQueue();
-}
+export { queueTableUpdate } from './syncEngine';
 
 export async function updatePatientRecord(patientId: string, updates: Partial<Patient>) {
     return queueTableUpdate('patients', patientId, updates);
@@ -204,11 +100,22 @@ export async function updatePatientVitals(patientId: string, vitals: Partial<Pat
 }
 
 export async function updatePatientRisk(patientId: string, riskLevel: RiskLevel) {
-    const { error } = await supabase
-        .from('patients')
-        .update({ risk_level: riskLevel, updated_at: new Date().toISOString() })
-        .eq('id', patientId);
-    return { error };
+    return writeThroughQueue({
+        table: 'patients',
+        action: 'update',
+        recordId: patientId,
+        payload: { risk_level: riskLevel, updated_at: new Date().toISOString() },
+        conflictKey: `patients:risk:${patientId}`,
+        online: async () => {
+            const { data, error } = await supabase
+                .from('patients')
+                .update({ risk_level: riskLevel, updated_at: new Date().toISOString() })
+                .eq('id', patientId)
+                .select()
+                .maybeSingle();
+            return { data, error };
+        },
+    });
 }
 
 /**
@@ -365,47 +272,34 @@ export async function getWeeklyAlerts(): Promise<WeeklyAlert[]> {
 
 // --- Mutation Functions ---
 
-export async function addPatient(patient: Omit<Patient, 'id'>) {
-    try {
-        const { data, error } = await supabase
-            .from('patients')
-            .insert([patient])
-            .select();
+export async function addPatient(payload: Record<string, unknown>) {
+    const recordId = (payload.id as string) ?? newRecordId();
+    const fullPayload = { ...payload, id: recordId };
 
-        if (error) throw error;
-        return { data, error };
-    } catch (error) {
-        await enqueueSyncOperation({
-            table: 'patients',
-            action: 'insert',
-            payload: patient,
-            timestamp: Date.now(),
-            conflictKey: `patients:pending_${generateQueueId()}`,
-        });
-        return { data: null, error };
-    }
+    return writeThroughQueue({
+        table: 'patients',
+        action: 'insert',
+        payload: fullPayload,
+        conflictKey: `patients:${recordId}`,
+        online: async () => {
+            const { data, error } = await supabase.from('patients').insert([fullPayload]).select().single();
+            return { data, error };
+        },
+    });
 }
 
-export async function updateProfile(userId: string, updates: any) {
-    try {
-        const { data, error } = await supabase
-            .from('profiles')
-            .update(updates)
-            .eq('id', userId);
-
-        if (error) throw error;
-        return { data, error };
-    } catch (error) {
-        await enqueueSyncOperation({
-            table: 'profiles',
-            action: 'update',
-            recordId: userId,
-            payload: updates,
-            timestamp: Date.now(),
-            conflictKey: `profiles:${userId}`,
-        });
-        return { data: null, error };
-    }
+export async function updateProfile(userId: string, updates: Record<string, unknown>) {
+    return writeThroughQueue({
+        table: 'profiles',
+        action: 'update',
+        recordId: userId,
+        payload: updates,
+        conflictKey: `profiles:${userId}`,
+        online: async () => {
+            const { data, error } = await supabase.from('profiles').update(updates).eq('id', userId).select().maybeSingle();
+            return { data, error };
+        },
+    });
 }
 
 export async function addDashboardTask(task: Omit<DashboardTask, 'id'>) {
@@ -417,45 +311,31 @@ export async function addDashboardTask(task: Omit<DashboardTask, 'id'>) {
     };
     if (task.assignedTo) payload.assigned_to = task.assignedTo;
 
-    try {
-        const { data, error } = await supabase
-            .from('dashboard_tasks')
-            .insert([payload])
-            .select();
-
-        if (error) throw error;
-        return { data, error };
-    } catch (error) {
-        await enqueueSyncOperation({
-            table: 'dashboard_tasks',
-            action: 'insert',
-            payload,
-            timestamp: Date.now(),
-            conflictKey: `dashboard_tasks:pending_${generateQueueId()}`,
-        });
-        return { data: null, error };
-    }
+    const conflictKey = `dashboard_tasks:pending_${generateQueueId()}`;
+    return writeThroughQueue({
+        table: 'dashboard_tasks',
+        action: 'insert',
+        payload,
+        conflictKey,
+        online: async () => {
+            const { data, error } = await supabase.from('dashboard_tasks').insert([payload]).select().single();
+            return { data, error };
+        },
+    });
 }
 
 export async function addWeeklyAlert(alert: Omit<WeeklyAlert, 'id'>) {
-    try {
-        const { data, error } = await supabase
-            .from('weekly_alerts')
-            .insert([alert])
-            .select();
-
-        if (error) throw error;
-        return { data, error };
-    } catch (error) {
-        await enqueueSyncOperation({
-            table: 'weekly_alerts',
-            action: 'insert',
-            payload: alert,
-            timestamp: Date.now(),
-            conflictKey: `weekly_alerts:pending_${generateQueueId()}`,
-        });
-        return { data: null, error };
-    }
+    const conflictKey = `weekly_alerts:pending_${generateQueueId()}`;
+    return writeThroughQueue({
+        table: 'weekly_alerts',
+        action: 'insert',
+        payload: alert as Record<string, unknown>,
+        conflictKey,
+        online: async () => {
+            const { data, error } = await supabase.from('weekly_alerts').insert([alert]).select().single();
+            return { data, error };
+        },
+    });
 }
 
 // --- Appointments ---
@@ -471,6 +351,7 @@ function mapAppointment(row: any): AppointmentRecord {
         patientName: row.patients?.name,
         doctorName: row.profiles?.name,
         patientRiskLevel: row.patients?.risk_level,
+        patientUrgencyScore: row.patients?.urgency_score != null ? Number(row.patients.urgency_score) : undefined,
     };
 }
 
@@ -480,7 +361,7 @@ export async function getDoctorAppointments(doctorId: string): Promise<Appointme
             .from('appointments')
             .select(`
                 *,
-                patients:patient_id (name, risk_level),
+                patients:patient_id (name, risk_level, urgency_score),
                 profiles:doctor_id (name)
             `)
             .eq('doctor_id', doctorId)
@@ -507,7 +388,7 @@ export async function getPatientAppointments(profileId: string): Promise<Appoint
             .from('appointments')
             .select(`
                 *,
-                patients:patient_id (name, risk_level),
+                patients:patient_id (name, risk_level, urgency_score),
                 profiles:doctor_id (name)
             `)
             .eq('patient_id', patientRow.id)
@@ -633,74 +514,106 @@ export async function getPatientIdForProfile(profileId: string): Promise<string 
     return data?.id ?? null;
 }
 
+export async function getPatientAbhaForProfile(
+    profileId: string
+): Promise<{ abhaId: string | null; verified: boolean }> {
+    const { data } = await supabase
+        .from('patients')
+        .select('abha_id, abha_verified')
+        .eq('profile_id', profileId)
+        .maybeSingle();
+    return {
+        abhaId: data?.abha_id ?? null,
+        verified: Boolean(data?.abha_verified),
+    };
+}
+
 export async function bookAppointment(params: {
     patientProfileId: string;
     doctorId: string;
     title: string;
     description?: string;
     appointmentTime: string;
-}): Promise<{ data: any; error: any }> {
-    try {
-        let patientId = await getPatientIdForProfile(params.patientProfileId);
+}): Promise<{ data: unknown; error: unknown }> {
+    let patientId = await getPatientIdForProfile(params.patientProfileId);
 
-        if (!patientId) {
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('name')
-                .eq('id', params.patientProfileId)
-                .maybeSingle();
+    if (!patientId) {
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('id', params.patientProfileId)
+            .maybeSingle();
 
-            const { data: created, error: createError } = await supabase
-                .from('patients')
-                .insert({
-                    name: profile?.name ?? 'Patient',
-                    age: 0,
-                    gender: 'Not Specified',
-                    condition: 'General',
-                    status: 'Stable',
-                    risk_level: 'Low',
-                    profile_id: params.patientProfileId,
-                    assigned_doctor_id: params.doctorId,
-                })
-                .select('id')
-                .single();
+        const newPatientId = newRecordId();
+        const patientPayload = {
+            id: newPatientId,
+            name: profile?.name ?? 'Patient',
+            age: 1,
+            gender: 'Not Specified',
+            condition: 'General',
+            status: 'Stable',
+            risk_level: 'Low',
+            profile_id: params.patientProfileId,
+            assigned_doctor_id: params.doctorId,
+        };
 
-            if (createError) throw createError;
-            patientId = created.id;
-        }
+        const patientResult = await writeThroughQueue({
+            table: 'patients',
+            action: 'insert',
+            payload: patientPayload,
+            conflictKey: `patients:${newPatientId}`,
+            online: async () => {
+                const { data, error } = await supabase.from('patients').insert(patientPayload).select('id').single();
+                return { data, error };
+            },
+        });
 
-        const { data, error } = await supabase
-            .from('appointments')
-            .insert({
-                patient_id: patientId,
-                doctor_id: params.doctorId,
-                title: params.title,
-                description: params.description ?? null,
-                appointment_time: params.appointmentTime,
-                status: 'Scheduled',
-                duration: 30,
-            })
-            .select()
-            .single();
-
-        if (error) throw error;
-        return { data, error: null };
-    } catch (error) {
-        return { data: null, error };
+        patientId =
+            (patientResult.data as { id?: string } | null)?.id ?? newPatientId;
     }
+
+    const apptPayload = {
+        patient_id: patientId,
+        doctor_id: params.doctorId,
+        title: params.title,
+        description: params.description ?? null,
+        appointment_time: params.appointmentTime,
+        status: 'Scheduled',
+        duration: 30,
+    };
+
+    return writeThroughQueue({
+        table: 'appointments',
+        action: 'insert',
+        payload: apptPayload,
+        conflictKey: `appointments:pending_${generateQueueId()}`,
+        online: async () => {
+            const { data, error } = await supabase.from('appointments').insert(apptPayload).select().single();
+            return { data, error };
+        },
+    });
 }
 
 export async function updateAppointmentStatus(
     appointmentId: string,
     status: AppointmentRecord['status']
 ) {
-    const { data, error } = await supabase
-        .from('appointments')
-        .update({ status })
-        .eq('id', appointmentId)
-        .select()
-        .single();
-    return { data, error };
+    return writeThroughQueue({
+        table: 'appointments',
+        action: 'update',
+        recordId: appointmentId,
+        payload: { status },
+        conflictKey: `appointments:${appointmentId}`,
+        online: async () => {
+            const { data, error } = await supabase
+                .from('appointments')
+                .update({ status })
+                .eq('id', appointmentId)
+                .select()
+                .single();
+            return { data, error };
+        },
+    });
 }
 
 // --- Medical records ---
@@ -776,20 +689,40 @@ export async function addMedicalRecord(record: {
     notes?: string;
     vitals?: Record<string, unknown>;
 }) {
-    const { data, error } = await supabase
-        .from('medical_records')
-        .insert({
-            patient_id: record.patientId,
-            doctor_id: record.doctorId,
-            diagnosis: record.diagnosis,
-            prescription: record.prescription,
-            notes: record.notes,
-            vitals: record.vitals ?? {},
-        })
-        .select()
-        .single();
+    const payload = {
+        patient_id: record.patientId,
+        doctor_id: record.doctorId,
+        diagnosis: record.diagnosis,
+        prescription: record.prescription,
+        notes: record.notes,
+        vitals: record.vitals ?? {},
+    };
 
-    return { data, error };
+    const result = await writeThroughQueue({
+        table: 'medical_records',
+        action: 'insert',
+        payload,
+        conflictKey: `medical_records:pending_${generateQueueId()}`,
+        online: async () => {
+            const { data, error } = await supabase.from('medical_records').insert(payload).select().single();
+            return { data, error };
+        },
+    });
+
+    if (record.vitals && Object.keys(record.vitals).length > 0) {
+        await addPatientVitals({
+            patientId: record.patientId,
+            recordedBy: record.doctorId,
+            vitals: {
+                heartRate: record.vitals.heart_rate != null ? Number(record.vitals.heart_rate) : undefined,
+                bloodPressure: record.vitals.blood_pressure as string | undefined,
+                bloodSugar: record.vitals.blood_sugar != null ? Number(record.vitals.blood_sugar) : undefined,
+                temperature: record.vitals.temperature != null ? Number(record.vitals.temperature) : undefined,
+            },
+        });
+    }
+
+    return result;
 }
 
 export async function createCampaign(campaign: {
@@ -802,23 +735,28 @@ export async function createCampaign(campaign: {
     createdBy: string;
     ward?: string;
 }) {
-    const { data, error } = await supabase
-        .from('campaigns')
-        .insert({
-            title: campaign.title,
-            description: campaign.description,
-            location: campaign.location,
-            campaign_date: campaign.campaignDate,
-            target_audience: campaign.targetAudience,
-            target_count: campaign.targetCount ?? 0,
-            created_by: campaign.createdBy,
-            ward: campaign.ward,
-            status: 'Planned',
-        })
-        .select()
-        .single();
+    const payload = {
+        title: campaign.title,
+        description: campaign.description,
+        location: campaign.location,
+        campaign_date: campaign.campaignDate,
+        target_audience: campaign.targetAudience,
+        target_count: campaign.targetCount ?? 0,
+        created_by: campaign.createdBy,
+        ward: campaign.ward,
+        status: 'Planned',
+    };
 
-    return { data, error };
+    return writeThroughQueue({
+        table: 'campaigns',
+        action: 'insert',
+        payload,
+        conflictKey: `campaigns:pending_${generateQueueId()}`,
+        online: async () => {
+            const { data, error } = await supabase.from('campaigns').insert(payload).select().single();
+            return { data, error };
+        },
+    });
 }
 
 // --- Vaccinations (Phase 4) ---
@@ -876,17 +814,30 @@ export async function getVaccinations(caregiverId?: string): Promise<Vaccination
 export async function markVaccinationComplete(
     vaccinationId: string,
     administeredBy: string
-): Promise<{ error: any }> {
-    const { error } = await supabase
-        .from('vaccinations')
-        .update({
-            status: 'completed',
-            administered_at: new Date().toISOString(),
-            administered_by: administeredBy,
-        })
-        .eq('id', vaccinationId);
+): Promise<{ error: unknown }> {
+    const payload = {
+        status: 'completed',
+        administered_at: new Date().toISOString(),
+        administered_by: administeredBy,
+    };
 
-    return { error };
+    const result = await writeThroughQueue({
+        table: 'vaccinations',
+        action: 'update',
+        recordId: vaccinationId,
+        payload,
+        conflictKey: `vaccinations:${vaccinationId}`,
+        online: async () => {
+            const { data, error } = await supabase
+                .from('vaccinations')
+                .update(payload)
+                .eq('id', vaccinationId)
+                .select()
+                .maybeSingle();
+            return { data, error };
+        },
+    });
+    return { error: result.error };
 }
 
 export async function addVaccination(record: {
@@ -898,23 +849,45 @@ export async function addVaccination(record: {
     assignedAshaId?: string;
     ward?: string;
 }) {
-    const { data, error } = await supabase
-        .from('vaccinations')
-        .insert({
-            child_name: record.childName,
-            age_label: record.ageLabel,
-            vaccine_name: record.vaccineName,
-            due_date: record.dueDate,
-            patient_id: record.patientId ?? null,
-            assigned_asha_id: record.assignedAshaId ?? null,
-            ward: record.ward ?? null,
-            status: 'due',
-        })
-        .select()
-        .single();
+    const payload = {
+        child_name: record.childName,
+        age_label: record.ageLabel,
+        vaccine_name: record.vaccineName,
+        due_date: record.dueDate,
+        patient_id: record.patientId ?? null,
+        assigned_asha_id: record.assignedAshaId ?? null,
+        ward: record.ward ?? null,
+        status: 'due',
+    };
 
-    return { data, error };
+    return writeThroughQueue({
+        table: 'vaccinations',
+        action: 'insert',
+        payload,
+        conflictKey: `vaccinations:pending_${generateQueueId()}`,
+        online: async () => {
+            const { data, error } = await supabase.from('vaccinations').insert(payload).select().single();
+            return { data, error };
+        },
+    });
 }
+
+export {
+  createReferral,
+  updateReferralStatus,
+  getReferralsForDoctor,
+  getReferralsForPatient,
+  getVitalsHistoryForPatient,
+  addPatientVitals,
+  persistPatientUrgency,
+} from './referralsApi';
+
+export {
+  getMedicationRemindersForPatient,
+  getMedicationDosesForProfile,
+  markMedicationDoseTaken,
+  createMedicationReminder,
+} from './medicationRemindersApi';
 
 export async function logVideoCallSession(params: {
     appointmentId?: string;
@@ -923,18 +896,23 @@ export async function logVideoCallSession(params: {
     participantId?: string;
     status?: 'Scheduled' | 'Active' | 'Completed' | 'Failed';
 }) {
-    const { data, error } = await supabase
-        .from('video_calls')
-        .insert({
-            appointment_id: params.appointmentId ?? null,
-            channel_name: params.channelName,
-            host_id: params.hostId,
-            participant_id: params.participantId ?? null,
-            status: params.status ?? 'Active',
-            start_time: new Date().toISOString(),
-        })
-        .select()
-        .single();
+    const payload = {
+        appointment_id: params.appointmentId ?? null,
+        channel_name: params.channelName,
+        host_id: params.hostId,
+        participant_id: params.participantId ?? null,
+        status: params.status ?? 'Active',
+        start_time: new Date().toISOString(),
+    };
 
-    return { data, error };
+    return writeThroughQueue({
+        table: 'video_calls',
+        action: 'insert',
+        payload,
+        conflictKey: `video_calls:pending_${generateQueueId()}`,
+        online: async () => {
+            const { data, error } = await supabase.from('video_calls').insert(payload).select().single();
+            return { data, error };
+        },
+    });
 }

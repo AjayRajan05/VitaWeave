@@ -1,10 +1,15 @@
 /**
- * Demo / skip-login is only available when explicitly enabled.
- * Set EXPO_PUBLIC_DEV_MODE=true in .env for local demos outside __DEV__ builds.
+ * Demo / skip-login only when explicitly enabled — never in production/pilot builds.
  */
 export function isDevModeEnabled(): boolean {
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    return process.env.EXPO_PUBLIC_DEV_MODE !== 'false';
+  if (process.env.NODE_ENV === 'production') {
+    return process.env.EXPO_PUBLIC_DEV_MODE === 'true';
   }
-  return process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+  if (process.env.EXPO_PUBLIC_DEV_MODE === 'false') {
+    return false;
+  }
+  if (process.env.EXPO_PUBLIC_DEV_MODE === 'true') {
+    return true;
+  }
+  return typeof __DEV__ !== 'undefined' && __DEV__;
 }

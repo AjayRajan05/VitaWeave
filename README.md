@@ -2,7 +2,7 @@
 
 **AI-powered community health platform for rural India** — connecting ASHA workers, doctors, and patients through one mobile app backed by Supabase, Gemini AI, and telemedicine.
 
-[![Expo](https://img.shields.io/badge/Expo-54-000020?logo=expo)](https://expo.dev)
+[![Expo](https://img.shields.io/badge/Expo-57-000020?logo=expo)](https://expo.dev)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react)](https://reactnative.dev)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3FCF8E?logo=supabase)](https://supabase.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript)](https://www.typescriptlang.org)
@@ -27,31 +27,46 @@ VitaWeave digitizes frontline healthcare workflows for **ASHA workers**, **docto
 ## Features (shipped)
 
 ### ASHA (`/(asha)`)
-- Dashboard with tasks, weekly alerts, community risk banner
-- Patient list with triage persistence to Supabase
+- Dashboard with tasks, weekly alerts, community risk banner, field route map
+- Patient list with triage persistence and **priority score** (rule-based vitals scoring)
+- Referrals (send to doctor / receive)
 - Vaccination tracking (due / completed)
 - Community health signals screen
-- MedGemma AI assistant with chat history
+- MedGemma AI assistant with chat history (en/hi/ta)
 - Profile wired to `profiles` table with live stats
+- Offline-first writes with sync status indicator
 
 ### Doctor (`/(doctor)`)
-- Today’s appointment queue and patient risk alerts
+- Today’s appointment queue sorted by **priority score** (long-press override)
+- Patient risk alerts and referrals inbox
 - Appointments with **Scheduled → Active → Completed** status linked to telemedicine
 - Telemedicine screen (Agora + local camera preview)
 - Record visit workflow with follow-up task creation
 - Health campaigns, add patient, medical records
 
 ### Patient (`/(patient)`)
-- Home dashboard, book appointment, view appointments
-- Profile with vitals / records summary from Supabase
+- Home dashboard with medication reminders (tap to mark dose taken)
+- Book appointment, view appointments
+- Profile with vitals / records summary; ABHA ID card (M1 placeholder)
+- Language picker (English, Hindi, Tamil)
+
+### Supervisor (`/(admin)`)
+- District metrics, program summary stats
+- Access audit log and priority scoring audit trail
+- Login via **District supervisor login** on main login screen
 
 ### Platform
 - Supabase Auth + Row Level Security (RLS)
 - Gemini via client or **Supabase Edge Function** proxy (`gemini-proxy`)
 - Agora token generation via **edge function** (`agora-token`)
+- **Server push** via `send-push` edge function + Expo Push tokens
 - Local push notifications for care-team digests and appointment reminders
+- **Offline write queue** with background sync (`syncEngine`)
+- Daily task generation edge function (`daily-task-generation`)
 - Sentry error monitoring, consent screen, PHI redaction utilities
 - CI pipeline (lint, typecheck, unit tests)
+
+See [docs/URGENCY_SCORING.md](docs/URGENCY_SCORING.md) for priority score methodology.
 
 ---
 
@@ -59,7 +74,7 @@ VitaWeave digitizes frontline healthcare workflows for **ASHA workers**, **docto
 
 | Layer | Technology | Why |
 |-------|------------|-----|
-| Mobile / Web | **Expo 54**, React Native, Expo Router | One codebase for Android, iOS, and web; fast iteration for field pilots |
+| Mobile / Web | **Expo 57**, React Native, Expo Router | One codebase for Android, iOS, and web; fast iteration for field pilots |
 | Backend | **Supabase** (PostgreSQL, Auth, RLS, Edge Functions) | Managed Postgres with built-in auth; RLS for multi-tenant healthcare data |
 | AI | **Google Gemini** (MedGemma-style prompts) | Clinical Q&A, task generation; keys kept server-side via edge proxy |
 | Video | **Agora** + `react-native-agora` | Low-latency telemedicine; tokens issued server-side |
@@ -107,19 +122,25 @@ EXPO_PUBLIC_DEV_MODE=false
 
 ### 3. Database
 
-In Supabase SQL Editor, run the full schema:
+In Supabase SQL Editor, run the full schema, then apply migrations in order:
 
 ```
 supabase/complete_schema.sql
+supabase/migrations/002_core_features.sql
+supabase/migrations/003_tier3_compliance.sql
 ```
 
-Create test users in Auth, then insert matching rows in `profiles` with roles `asha`, `doctor`, or `patient`.
+Or with Supabase CLI: `supabase db push`
+
+Create test users in Auth, then insert matching rows in `profiles` with roles `asha`, `doctor`, `patient`, or `admin`.
 
 ### 4. Edge functions (recommended for production)
 
 ```bash
 supabase functions deploy gemini-proxy
 supabase functions deploy agora-token
+supabase functions deploy daily-task-generation
+supabase functions deploy send-push
 ```
 
 Set secrets in Supabase Dashboard: `GEMINI_API_KEY`, `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE`.
@@ -143,19 +164,20 @@ npm run lint         # ESLint
 ```
 app/                    # Expo Router screens (role-based route groups)
   (asha)/               # ASHA worker flows
-  (doctor)/               # Doctor flows + telemedicine
-  (patient)/              # Patient flows
-  login.tsx, consent.tsx
-components/               # Shared UI (PatientPicker, EmptyState, …)
-hooks/                    # useUserProfile, useCareTeamPatients, useAIChat
-lib/                      # API, auth, workflows, notifications
-  api.ts                  # Supabase data access
-  appointmentWorkflow.ts  # Telemedicine status transitions
-  clinicalWorkflow.ts     # Visit notes → follow-up tasks
-  dataPolicy.ts           # Demo vs live data
+  (doctor)/             # Doctor flows + telemedicine
+  (patient)/            # Patient flows
+  (admin)/              # District supervisor console
+  login.tsx, admin-login.tsx, consent.tsx
+components/             # Shared UI (PatientPicker, EmptyState, SyncStatusDot, …)
+hooks/                  # useUserProfile, useTranslation, useAIChat
+lib/                    # API, auth, workflows, notifications, urgency scoring
+  api.ts                # Supabase data access + offline write queue
+  urgencyScoring.ts     # Rule-based priority score (NEWS2 + maternal refs)
+  syncEngine.ts         # Background sync for queued writes
 supabase/
   complete_schema.sql     # Canonical DB schema + RLS
-  functions/              # gemini-proxy, agora-token
+  migrations/           # 002_core_features, 003_tier3_compliance
+  functions/            # gemini-proxy, agora-token, daily-task-generation, send-push
 tests/                    # Jest unit tests
 docs/                     # Architecture, pitch, deployment guides
 ```
@@ -173,12 +195,13 @@ docs/                     # Architecture, pitch, deployment guides
 ### ASHA triage
 
 1. Worker updates patient risk on **Patients** screen
-2. `updatePatientRisk()` persists to `patients` table
-3. Community signals aggregate ward-level risk from `community_alerts`
+2. Vitals feed **priority score** via `lib/urgencyScoring.ts` (rule-based, not ML at runtime)
+3. `updatePatientRisk()` persists to `patients` table; scoring audit logged
+4. Community signals aggregate ward-level risk from `community_alerts`
 
 ### Notifications
 
-On dashboard load, `syncRoleNotifications()` sends deduplicated local notifications for urgent tasks, alerts, and vaccination due dates (requires device build with `expo-notifications`).
+On dashboard load, `syncRoleNotifications()` schedules local notifications and may invoke `send-push` for registered device tokens.
 
 ---
 

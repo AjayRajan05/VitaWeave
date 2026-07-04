@@ -29,6 +29,11 @@ Step-by-step instructions to deploy VitaWeave from development to production.
 1. SQL Editor → New query
 2. Paste entire contents of `supabase/complete_schema.sql`
 3. Run — verify tables in Table Editor
+4. Apply incremental migrations in order:
+   - `supabase/migrations/002_core_features.sql`
+   - `supabase/migrations/003_tier3_compliance.sql`
+
+Or with CLI linked to the project: `supabase db push`
 
 ### Create auth users
 
@@ -41,7 +46,8 @@ INSERT INTO profiles (id, email, name, role, ward, phone)
 VALUES
   ('<auth-uuid-asha>', 'asha@test.com', 'Sunita Sharma', 'asha', '12', '+91...'),
   ('<auth-uuid-doctor>', 'doctor@test.com', 'Dr. Rajesh Sharma', 'doctor', '12', '+91...'),
-  ('<auth-uuid-patient>', 'patient@test.com', 'Lakshmi Bai', 'patient', '12', '+91...');
+  ('<auth-uuid-patient>', 'patient@test.com', 'Lakshmi Bai', 'patient', '12', '+91...'),
+  ('<auth-uuid-admin>', 'supervisor@test.com', 'District Supervisor', 'admin', '12', '+91...');
 ```
 
 ### Seed sample patients (optional)
@@ -65,6 +71,8 @@ Deploy:
 ```bash
 supabase functions deploy gemini-proxy --no-verify-jwt
 supabase functions deploy agora-token --no-verify-jwt
+supabase functions deploy daily-task-generation --no-verify-jwt
+supabase functions deploy send-push --no-verify-jwt
 ```
 
 Set secrets (Dashboard → Edge Functions → Secrets):
@@ -117,8 +125,11 @@ npm run dev
 
 Test login for each role. Verify:
 - ASHA patients load from DB
-- Doctor appointments show
+- Doctor appointments show urgency-sorted queue
 - Profile screens show real names
+- Supervisor reaches `/(admin)` via **District supervisor login**
+- Sync status dot appears after offline writes (toggle airplane mode briefly)
+- Patient profile shows ABHA card (placeholder until `patients.abha_id` is set)
 
 ---
 
@@ -194,12 +205,14 @@ Current CI runs lint + typecheck + unit tests without secrets.
 
 | Check | How |
 |-------|-----|
-| Auth login | Each role reaches correct home |
+| Auth login | Each role (asha, doctor, patient, admin) reaches correct home |
 | RLS | Patient A cannot read Patient B records |
 | Gemini proxy | Network tab shows edge URL, not Google direct |
 | Agora token | Token fetched from edge before join |
 | Appointments | Status transitions on video start/end |
-| Notifications | Permission prompt on device build |
+| Notifications | Permission prompt on device build; `push_tokens` row after login |
+| Server push | `send-push` invoked from care notification flow |
+| Audit logs | Supervisor dashboard lists recent `audit_log` / `scoring_audit` rows |
 | Sentry | Trigger test error in staging |
 
 ---

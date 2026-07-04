@@ -4,12 +4,12 @@ import {
   House as Home,
   UsersRound as Users,
   BotMessageSquare as Bot,
-  BriefcaseMedical as Briefcase,
   UserRound as User,
   RadioTower as Radio
 } from 'lucide-react-native';
 import { Platform, StyleSheet, useWindowDimensions, View, ActivityIndicator } from 'react-native';
 import { useRoleGuard } from '../../lib/authGuard';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
 
 export default function AshaTabLayout() {
   const { width } = useWindowDimensions();
@@ -38,6 +38,11 @@ export default function AshaTabLayout() {
         tabBarLabelStyle: styles.tabBarLabel,
         headerStyle: styles.header,
         headerTitleStyle: styles.headerTitle,
+        headerRight: () => (
+          <View style={styles.headerRight}>
+            <SyncStatusDot accentColor="#d97706" />
+          </View>
+        ),
       }}>
       <Tabs.Screen
         name="index"
@@ -68,19 +73,19 @@ export default function AshaTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="services"
-        options={{
-          title: 'Services',
-          tabBarIcon: ({ color }) => <Briefcase size={20} color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ color }) => <User size={20} color={color} />,
         }}
       />
+      {/* Secondary screens — reachable from Home, not bottom tabs */}
+      <Tabs.Screen name="refer-patient" options={{ href: null, title: 'Refer Patient' }} />
+      <Tabs.Screen name="services" options={{ href: null, title: 'Field Services' }} />
+      <Tabs.Screen name="vaccinations" options={{ href: null, title: 'Vaccinations' }} />
+      <Tabs.Screen name="add-patient" options={{ href: null, title: 'Add Patient' }} />
+      <Tabs.Screen name="add-task" options={{ href: null, title: 'Add Task' }} />
+      <Tabs.Screen name="add-alert" options={{ href: null, title: 'Add Alert' }} />
     </Tabs>
   );
 }
@@ -118,4 +123,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#0f172a',
   },
+  headerRight: { marginRight: 14 },
 });

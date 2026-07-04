@@ -1,6 +1,7 @@
 import { getPatients, getCommunityAlerts } from './api';
 import { getMedGemmaResponse } from './gemini';
-import type { DashboardTask } from '../app/constants/data';
+import { geminiLanguageInstruction, getLocale } from './i18n';
+import type { DashboardTask } from '../app/_constants/data';
 
 export async function generateAITaskSuggestions(): Promise<Omit<DashboardTask, 'id'>[]> {
     try {
@@ -18,6 +19,8 @@ export async function generateAITaskSuggestions(): Promise<Omit<DashboardTask, '
         `;
 
         const prompt = `
+            ${geminiLanguageInstruction(getLocale())}
+
             Based on the provided PATIENTS and COMMUNITY ALERTS context, generate 2-3 specific action items (tasks) for a Community Health Worker (ASHA).
             
             Return ONLY a valid JSON array of objects with the following keys. Do not include markdown codeblocks or any other text.

@@ -64,9 +64,11 @@ export default function RootLayout() {
         <Stack.Screen name="doctor-login" />
         <Stack.Screen name="asha-login" />
         <Stack.Screen name="patient-login" />
+        <Stack.Screen name="admin-login" />
         <Stack.Screen name="(asha)" />
         <Stack.Screen name="(doctor)" />
         <Stack.Screen name="(patient)" />
+        <Stack.Screen name="(admin)" />
         <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not Found' }} />
       </Stack>
     </ErrorBoundary>

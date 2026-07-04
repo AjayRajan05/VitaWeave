@@ -23,8 +23,12 @@ export class ProductionInitializer {
       logger.info('Environment validation passed');
     }
 
+    for (const warning of EnvValidator.getRecommendedWarnings()) {
+      logger.warn(warning);
+    }
+
     if (config.sentryDsn) {
-      SentryManager.initialize({
+      void SentryManager.initialize({
         dsn: config.sentryDsn,
         environment: config.environment || process.env.NODE_ENV || 'development',
         release: config.release,

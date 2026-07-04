@@ -10,7 +10,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { getPatientAppointments } from '../../lib/api';
 import { getStoredUserId } from '../../lib/authGuard';
 import { formatAppointmentDate, formatAppointmentTime, isAppointmentPast } from '../../lib/formatters';
-import type { AppointmentRecord } from '../constants/data';
+import type { AppointmentRecord } from '../_constants/data';
 
 type TabType = 'upcoming' | 'past';
 

@@ -1,7 +1,9 @@
 // Sentry integration for production error monitoring
-import * as Sentry from '@sentry/react-native';
 import { logger } from './logger';
 import { redactPhi } from './phiSecurity';
+
+type SentryModule = typeof import('@sentry/react-native');
+type SentrySeverityLevel = 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug';
 
 export interface SentryConfig {
   dsn: string;
@@ -12,8 +14,20 @@ export interface SentryConfig {
 
 export class SentryManager {
   private static isInitialized = false;
+  private static sentry: SentryModule | null = null;
 
-  static initialize(config: SentryConfig): void {
+  private static async loadSentry(): Promise<SentryModule | null> {
+    if (this.sentry) return this.sentry;
+    try {
+      this.sentry = await import('@sentry/react-native');
+      return this.sentry;
+    } catch (error) {
+      logger.warn('Sentry native module unavailable:', error);
+      return null;
+    }
+  }
+
+  static async initialize(config: SentryConfig): Promise<void> {
     if (this.isInitialized) {
       logger.warn('Sentry already initialized');
       return;
@@ -23,6 +37,9 @@ export class SentryManager {
       logger.warn('Sentry DSN not provided, skipping initialization');
       return;
     }
+
+    const Sentry = await this.loadSentry();
+    if (!Sentry) return;
 
     try {
       Sentry.init({
@@ -60,10 +77,10 @@ export class SentryManager {
   }
 
   static setUser(user: { id: string; email?: string; username?: string }): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized || !this.sentry) return;
 
     try {
-      Sentry.setUser(user);
+      this.sentry.setUser(user);
       logger.info('Sentry user set', { userId: user.id });
     } catch (error) {
       logger.error('Failed to set Sentry user:', error);
@@ -71,10 +88,10 @@ export class SentryManager {
   }
 
   static clearUser(): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized || !this.sentry) return;
 
     try {
-      Sentry.setUser(null);
+      this.sentry.setUser(null);
       logger.info('Sentry user cleared');
     } catch (error) {
       logger.error('Failed to clear Sentry user:', error);
@@ -82,13 +99,13 @@ export class SentryManager {
   }
 
   static captureException(error: Error, context?: Record<string, any>): void {
-    if (!this.isInitialized) {
+    if (!this.isInitialized || !this.sentry) {
       logger.error('Sentry not initialized, falling back to logger:', error);
       return;
     }
 
     try {
-      Sentry.captureException(error, {
+      this.sentry.captureException(error, {
         contexts: { custom: context },
       });
       logger.info('Exception captured by Sentry', { message: error.message });
@@ -98,14 +115,18 @@ export class SentryManager {
     }
   }
 
-  static captureMessage(message: string, level: Sentry.SeverityLevel = 'info', context?: Record<string, any>): void {
-    if (!this.isInitialized) {
+  static captureMessage(
+    message: string,
+    level: SentrySeverityLevel = 'info',
+    context?: Record<string, any>
+  ): void {
+    if (!this.isInitialized || !this.sentry) {
       this.logByLevel(level, `Sentry not initialized: ${message}`, context);
       return;
     }
 
     try {
-      Sentry.captureMessage(message, {
+      this.sentry.captureMessage(message, {
         level,
         contexts: context ? { custom: context } : undefined,
       });
@@ -117,7 +138,7 @@ export class SentryManager {
   }
 
   private static logByLevel(
-    level: Sentry.SeverityLevel,
+    level: SentrySeverityLevel,
     message: string,
     context?: Record<string, any>
   ): void {
@@ -140,13 +161,13 @@ export class SentryManager {
   static addBreadcrumb(breadcrumb: {
     message: string;
     category?: string;
-    level?: Sentry.SeverityLevel;
+    level?: SentrySeverityLevel;
     data?: Record<string, any>;
   }): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized || !this.sentry) return;
 
     try {
-      Sentry.addBreadcrumb({
+      this.sentry.addBreadcrumb({
         message: breadcrumb.message,
         category: breadcrumb.category || 'default',
         level: breadcrumb.level || 'info',
@@ -159,20 +180,20 @@ export class SentryManager {
   }
 
   static setContext(key: string, context: Record<string, any>): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized || !this.sentry) return;
 
     try {
-      Sentry.setContext(key, context);
+      this.sentry.setContext(key, context);
     } catch (error) {
       logger.error('Failed to set Sentry context:', error);
     }
   }
 
   static startTransaction(name: string, operation: string = 'navigation'): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized || !this.sentry) return;
 
     try {
-      Sentry.startSpan({ name, op: operation }, () => undefined);
+      this.sentry.startSpan({ name, op: operation }, () => undefined);
       logger.info('Sentry span started', { name, operation });
     } catch (error) {
       logger.error('Failed to start Sentry span:', error);
@@ -184,14 +205,12 @@ export class SentryManager {
   }
 }
 
-// Integration with error handler
 export const setupSentryIntegration = (config: SentryConfig) => {
-  SentryManager.initialize(config);
+  void SentryManager.initialize(config);
 
-  // Override error handler to send to Sentry
-  const originalHandleError = (global as any).handleError;
+  const originalHandleError = (globalThis as any).handleError;
   if (originalHandleError) {
-    (global as any).handleError = (error: Error, context?: string) => {
+    (globalThis as any).handleError = (error: Error, context?: string) => {
       SentryManager.captureException(error, { context });
       return originalHandleError(error, context);
     };

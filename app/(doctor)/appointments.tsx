@@ -17,7 +17,7 @@ import {
     isAppointmentToday,
     mapAppointmentStatusToUi,
 } from '../../lib/formatters';
-import type { AppointmentRecord } from '../constants/data';
+import type { AppointmentRecord } from '../_constants/data';
 
 type TabType = 'today' | 'upcoming';
 

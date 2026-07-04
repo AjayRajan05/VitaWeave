@@ -1,5 +1,4 @@
 // Production logger utility - replaces console.log statements
-import { SentryManager } from './sentry';
 import { sanitizeForLogging } from './phiSecurity';
 
 export enum LogLevel {
@@ -37,8 +36,12 @@ class Logger {
         break;
       case LogLevel.ERROR:
         console.error(logMessage, ...safeArgs);
-        if (this.isProduction && SentryManager.isReady()) {
-          SentryManager.captureMessage(message, 'error', { args: safeArgs });
+        if (this.isProduction) {
+          void import('./sentry').then(({ SentryManager }) => {
+            if (SentryManager.isReady()) {
+              SentryManager.captureMessage(message, 'error', { args: safeArgs });
+            }
+          });
         }
         break;
     }

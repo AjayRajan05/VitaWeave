@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
     ActivityIndicator, TextInput, Modal,
@@ -9,6 +9,10 @@ import {
     Settings, Bell, Globe, LogOut, ChevronRight, FileText,
 } from 'lucide-react-native';
 import { useUserProfile } from '../../hooks/useUserProfile';
+import { LanguagePicker } from '../../components/LanguagePicker';
+import { AbhaLinkCard } from '../../components/AbhaLinkCard';
+import { setLocaleFromProfile } from '../../lib/i18n';
+import { getPatientAbhaForProfile } from '../../lib/api';
 import type { PatientProfileStats } from '../../lib/profileStats';
 
 const MENU_ITEMS = [
@@ -25,9 +29,21 @@ export default function PatientProfileScreen() {
     const patientStats = stats as PatientProfileStats | null;
     const [editOpen, setEditOpen] = useState(false);
     const [name, setName] = useState('');
+    const [abha, setAbha] = useState<{ abhaId: string | null; verified: boolean }>({
+        abhaId: null,
+        verified: false,
+    });
+
+    useEffect(() => {
+        if (!profile?.id) return;
+        getPatientAbhaForProfile(profile.id)
+            .then(setAbha)
+            .catch(() => undefined);
+    }, [profile?.id]);
     const [phone, setPhone] = useState('');
     const [ward, setWard] = useState('');
     const [saving, setSaving] = useState(false);
+    const [langOpen, setLangOpen] = useState(false);
 
     const handleLogout = () => {
         Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -85,6 +101,8 @@ export default function PatientProfileScreen() {
                 </View>
             </View>
 
+            <AbhaLinkCard abhaId={abha.abhaId} verified={abha.verified} />
+
             <View style={styles.infoCard}>
                 <View style={styles.infoRow}>
                     <Phone size={16} color="#94a3b8" />
@@ -123,7 +141,13 @@ export default function PatientProfileScreen() {
             </View>
 
             {MENU_ITEMS.map(({ icon: Icon, label, color }) => (
-                <TouchableOpacity key={label} style={styles.menuItem}>
+                <TouchableOpacity
+                    key={label}
+                    style={styles.menuItem}
+                    onPress={() => {
+                        if (label === 'Language') setLangOpen(true);
+                    }}
+                >
                     <View style={[styles.menuIcon, { backgroundColor: color + '15' }]}>
                         <Icon size={18} color={color} />
                     </View>
@@ -158,6 +182,20 @@ export default function PatientProfileScreen() {
                     </View>
                 </View>
             </Modal>
+
+            <LanguagePicker
+                visible={langOpen}
+                currentLanguage={profile?.language}
+                onClose={() => setLangOpen(false)}
+                onSelect={async (language) => {
+                    const { error } = await saveProfile({ language });
+                    if (error) {
+                        Alert.alert('Update failed', error instanceof Error ? error.message : 'Could not save language');
+                        return;
+                    }
+                    await setLocaleFromProfile(language);
+                }}
+            />
         </ScrollView>
     );
 }

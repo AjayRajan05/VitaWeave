@@ -14,10 +14,15 @@ import {
     getPatientMedications,
     getPatientAppointments,
     getPatientDisplayName,
+    getMedicationDosesForProfile,
+    markMedicationDoseTaken,
 } from '../../lib/api';
 import { getStoredUserId } from '../../lib/authGuard';
+import { getUserProfile } from '../../lib/auth';
 import { formatAppointmentDate, formatAppointmentTime } from '../../lib/formatters';
-import type { PatientMedication, PatientVital } from '../constants/data';
+import { SyncStatusDot } from '../../components/SyncStatusDot';
+import { useTranslation } from '../../hooks/useTranslation';
+import type { MedicationReminderDose, PatientMedication, PatientVital } from '../_constants/data';
 
 const TIPS = [
     'Drink at least 8 glasses of water daily',
@@ -28,8 +33,10 @@ const TIPS = [
 export default function PatientDashboard() {
     const [loading, setLoading] = useState(true);
     const [name, setName] = useState('Patient');
+    const [profileLanguage, setProfileLanguage] = useState<string | null>(null);
+    const { t } = useTranslation(profileLanguage);
     const [vitals, setVitals] = useState<PatientVital | null>(null);
-    const [medications, setMedications] = useState<PatientMedication[]>([]);
+    const [medDoses, setMedDoses] = useState<MedicationReminderDose[]>([]);
     const [upcomingAppointments, setUpcomingAppointments] = useState<
         { doctor: string; type: string; date: string; color: string }[]
     >([]);
@@ -40,16 +47,32 @@ export default function PatientDashboard() {
             const profileId = await getStoredUserId();
             if (!profileId) return;
 
-            const [displayName, vitalData, meds, appointments] = await Promise.all([
+            const [displayName, vitalData, doses, legacyMeds, appointments, profileRes] = await Promise.all([
                 getPatientDisplayName(profileId),
                 getPatientVitals(profileId),
+                getMedicationDosesForProfile(profileId),
                 getPatientMedications(profileId),
                 getPatientAppointments(profileId),
+                getUserProfile(profileId),
             ]);
 
+            if (profileRes.data?.language) setProfileLanguage(profileRes.data.language);
             setName(displayName);
             setVitals(vitalData);
-            setMedications(meds);
+
+            if (doses.length) {
+                setMedDoses(doses);
+            } else {
+                setMedDoses(
+                    legacyMeds.map((med: PatientMedication) => ({
+                        reminderId: `legacy-${med.id}`,
+                        medicationName: med.name,
+                        timeLabel: med.schedule || 'As directed',
+                        timeKey: med.schedule || 'any',
+                        takenToday: med.takenToday,
+                    }))
+                );
+            }
 
             const colors = ['#0891b2', '#7c3aed', '#d97706'];
             const upcoming = appointments
@@ -83,6 +106,18 @@ export default function PatientDashboard() {
         ]
         : [];
 
+    const toggleDose = async (dose: MedicationReminderDose) => {
+        if (dose.takenToday || dose.reminderId.startsWith('legacy-')) return;
+        await markMedicationDoseTaken(dose.reminderId, dose.timeKey);
+        setMedDoses((prev) =>
+            prev.map((d) =>
+                d.reminderId === dose.reminderId && d.timeKey === dose.timeKey
+                    ? { ...d, takenToday: true }
+                    : d
+            )
+        );
+    };
+
     if (loading) {
         return (
             <View style={styles.loadingWrap}>
@@ -95,17 +130,20 @@ export default function PatientDashboard() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.header}>
                 <View>
-                    <Text style={styles.greeting}>Welcome back,</Text>
+                    <Text style={styles.greeting}>{t('common.welcome')}</Text>
                     <Text style={styles.name}>{name}</Text>
                 </View>
-                <TouchableOpacity style={styles.notifBtn}>
-                    <BellDot size={22} color="#059669" />
-                    <View style={styles.notifDot} />
-                </TouchableOpacity>
+                <View style={styles.headerRight}>
+                    <SyncStatusDot accentColor="#059669" />
+                    <TouchableOpacity style={styles.notifBtn}>
+                        <BellDot size={22} color="#059669" />
+                        <View style={styles.notifDot} />
+                    </TouchableOpacity>
+                </View>
             </Animated.View>
 
             <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-                <Text style={styles.sectionTitle}>My Vitals</Text>
+                <Text style={styles.sectionTitle}>{t('patient.vitals')}</Text>
                 {vitalCards.length > 0 ? (
                     <View style={styles.vitalGrid}>
                         {vitalCards.map(({ label, value, unit, icon: Icon, color, bg }) => (
@@ -120,33 +158,40 @@ export default function PatientDashboard() {
                         ))}
                     </View>
                 ) : (
-                    <Text style={styles.emptyText}>No vitals recorded yet. Your healthcare provider will update these after your next visit.</Text>
+                    <Text style={styles.emptyText}>{t('patient.noVitals')}</Text>
                 )}
             </Animated.View>
 
             <Animated.View entering={FadeInDown.delay(300).duration(500)}>
-                <Text style={styles.sectionTitle}>Today's Medications</Text>
-                {medications.length > 0 ? (
-                    medications.map((med) => (
-                        <View key={med.id} style={styles.medRow}>
+                <Text style={styles.sectionTitle}>{t('patient.medications')}</Text>
+                {medDoses.length > 0 ? (
+                    medDoses.map((med) => (
+                        <TouchableOpacity
+                            key={`${med.reminderId}-${med.timeKey}`}
+                            style={styles.medRow}
+                            onPress={() => toggleDose(med)}
+                            disabled={med.takenToday || med.reminderId.startsWith('legacy-')}
+                        >
                             <View style={[styles.medCheck, med.takenToday && styles.medCheckDone]}>
                                 {med.takenToday && <Text style={styles.medCheckMark}>✓</Text>}
                             </View>
                             <View style={{ flex: 1 }}>
-                                <Text style={[styles.medName, med.takenToday && styles.medNameDone]}>{med.name}</Text>
-                                <Text style={styles.medTime}>{med.schedule}</Text>
+                                <Text style={[styles.medName, med.takenToday && styles.medNameDone]}>{med.medicationName}</Text>
+                                <Text style={styles.medTime}>
+                                    {med.dosage ? `${med.dosage} · ` : ''}{t('patient.doseDue', { time: med.timeLabel })}
+                                </Text>
                             </View>
                             <Pill size={16} color={med.takenToday ? '#059669' : '#94a3b8'} />
-                        </View>
+                        </TouchableOpacity>
                     ))
                 ) : (
-                    <Text style={styles.emptyText}>No active medications on record.</Text>
+                    <Text style={styles.emptyText}>{t('patient.noMeds')}</Text>
                 )}
             </Animated.View>
 
             <Animated.View entering={FadeInDown.delay(400).duration(500)}>
                 <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Upcoming Visits</Text>
+                    <Text style={styles.sectionTitle}>{t('patient.visits')}</Text>
                 </View>
                 {upcomingAppointments.length > 0 ? (
                     upcomingAppointments.map((appt, i) => (
@@ -163,14 +208,14 @@ export default function PatientDashboard() {
                         </TouchableOpacity>
                     ))
                 ) : (
-                    <Text style={styles.emptyText}>No upcoming appointments scheduled.</Text>
+                    <Text style={styles.emptyText}>{t('patient.noVisits')}</Text>
                 )}
             </Animated.View>
 
             <Animated.View entering={FadeInDown.delay(500).duration(500)} style={styles.tipsCard}>
                 <View style={styles.tipsHeader}>
                     <Lightbulb size={16} color="#d97706" />
-                    <Text style={styles.tipsTitle}>Health Tips for You</Text>
+                    <Text style={styles.tipsTitle}>{t('patient.tips')}</Text>
                 </View>
                 {TIPS.map((tip, i) => (
                     <Text key={i} style={styles.tipText}>• {tip}</Text>
@@ -180,7 +225,7 @@ export default function PatientDashboard() {
             <Animated.View entering={FadeInDown.delay(600).duration(500)} style={styles.sleepCard}>
                 <View style={styles.sleepHeader}>
                     <Moon size={16} color="#7c3aed" />
-                    <Text style={styles.sleepTitle}>Wellness Reminder</Text>
+                    <Text style={styles.sleepTitle}>{t('patient.wellness')}</Text>
                 </View>
                 <Text style={styles.emptyText}>Sleep tracking will be available in a future update.</Text>
             </Animated.View>
@@ -196,6 +241,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row', justifyContent: 'space-between',
         alignItems: 'center', marginBottom: 24,
     },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     greeting: { fontFamily: 'Inter-Regular', fontSize: 14, color: '#64748b' },
     name: { fontFamily: 'Inter-Bold', fontSize: 24, color: '#0f172a' },
     notifBtn: {

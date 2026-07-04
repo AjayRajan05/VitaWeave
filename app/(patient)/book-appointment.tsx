@@ -69,7 +69,7 @@ export default function BookAppointmentScreen() {
         setLoading(false);
 
         if (error) {
-            Alert.alert('Booking Failed', error.message || 'Could not book appointment.');
+            Alert.alert('Booking Failed', error instanceof Error ? error.message : 'Could not book appointment.');
             return;
         }
 
