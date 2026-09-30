@@ -376,5 +376,6 @@ Detailed documentation is available in the [`docs/`](file:///s:/VitaWeave/projec
 ## 👥 Authors & Acknowledgments
 
 - **Platform**: VitaWeave Healthcare Platform
-- **Domain**: Pragati AI for Impact · Healthcare Domain
+- **Domain**: Buikd with AI: Code for Communities. Track 3 - Smart Health and Supply Chain Resilience
+- **Theme**:Resilience
 - **Alignment**: UN Sustainable Development Goal 3 (Good Health & Well-Being) & Ayushman Bharat Digital Mission (ABDM)
