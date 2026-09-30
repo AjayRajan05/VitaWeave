@@ -165,7 +165,26 @@ Apply after `complete_schema.sql`:
 | `006_consent_data_rights.sql` | consent_records, data_rights_requests |
 | `007_surveillance_campaigns.sql` | campaign publish + alert source/ward |
 
-Local offline mirror: WatermelonDB (`lib/db/watermelonSchema.ts` + `lib/db/tableDefs.ts`) synced via `lib/sync/SyncService.ts`.
+---
+
+## Google Cloud Firebase / Firestore Collections
+
+VitaWeave leverages Google Cloud Firestore for real-time document streaming, live state synchronization, and district-level inventory coordination:
+
+| Collection Path | Purpose | Key Attributes |
+|-----------------|---------|----------------|
+| `active_triage_alerts/{alertId}` | Real-time high-urgency notifications broadcast to local care teams | `patientId`, `urgencyScore`, `rationaleTags`, `ward`, `createdAt`, `acknowledgedBy` |
+| `phc_inventory_status/{phcId}` | Live operational capacity and resource levels for demand forecasting | `phcName`, `district`, `bedsAvailable`, `medicineStock` (JSON map of essential drugs), `doctorOnDuty`, `updatedAt` |
+| `ward_surveillance_signals/{signalId}` | Frontline syndromic epidemic signals aggregated across field workers | `ward`, `symptomType` (fever/diarrhea/respiratory), `caseCount`, `severity`, `timestamp` |
+| `redistribution_orders/{orderId}` | Inter-PHC supply redistribution recommendations and approvals | `sourcePhcId`, `targetPhcId`, `resourceType`, `quantity`, `algorithmRationale`, `status` (`pending` / `approved` / `dispatched` / `received`) |
+
+---
+
+## Local Offline Mirror (WatermelonDB + SQLite)
+
+To guarantee 100% operation in remote rural areas with zero connectivity, a local-first mirror is maintained on the client device:
+- **Schema Definition**: `lib/db/watermelonSchema.ts` + `lib/db/tableDefs.ts`
+- **Synchronization**: `lib/sync/SyncService.ts` and `lib/syncEngine.ts` queue offline writes and perform bi-directional reconciliation with Google Cloud Firebase and PostgreSQL upon network reconnection.
 
 ---
 

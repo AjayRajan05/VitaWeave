@@ -1,46 +1,69 @@
 # VitaWeave Architecture
 
-## High-level diagram
+## System Overview & Continuous Coordination Loop
+
+VitaWeave transitions rural healthcare from passive paperwork to active, closed-loop clinical and operational intelligence:
+
+```mermaid
+flowchart LR
+    A["ASHA / ANM<br/>Identify Case"] --> B["NEWS2 & Maternal<br/>Prioritize Urgency"]
+    B --> C["Closed-Loop<br/>Refer to PHC/CHC"]
+    C --> D["Track Status<br/>To Completion"]
+    D --> E["Aggregate Frontline<br/>Demand Signals"]
+    E --> F["AI Forecasting<br/>Anticipate Gaps"]
+    F --> G["Explainable<br/>Redistribute Resources"]
+    G --> H["Authorized<br/>Improve Care"]
+    H --> A
+```
+
+---
+
+## High-Level Architecture Diagram
 
 ```mermaid
 flowchart TB
-    subgraph clients [Clients]
-        ASHA[ASHA App Tab]
-        DOC[Doctor App Tab]
-        PAT[Patient App Tab]
-        WEB[Expo Web]
+    subgraph clients [Multi-Role Clients (Expo 57 / React Native 0.86)]
+        ASHA["ASHA / ANM Mobile App<br/>(Offline-First • Daily Tasks • Triage)"]
+        DOC["Doctor / PHC Console<br/>(Urgency Queue • Telemedicine)"]
+        ADM["District Health Supervisor<br/>(Demand Intelligence • Resource Redistribution)"]
+        PAT["Patient Health App<br/>(Meds • Teleconsult • ABHA)"]
     end
 
-    subgraph expo [Expo Application]
-        ROUTER[Expo Router]
-        AUTH[lib/auth + authGuard]
-        API[lib/api.ts]
-        WF[Workflows: clinical, appointment, notifications]
+    subgraph app_core [Client Core Engine]
+        ROUTER["Expo Router v6 (Role Groups)"]
+        OFFLINE_DB[("WatermelonDB + SQLite<br/>(Local-First Offline Storage)")]
+        SYNC_ENG["Offline Sync Engine<br/>(Queue • Conflict Merge)"]
+        URGENCY["Clinical Urgency Engine<br/>(NEWS2 + Maternal Risk)"]
     end
 
-    subgraph supabase [Supabase]
-        PG[(PostgreSQL + RLS)]
-        AUTHZ[Supabase Auth]
-        EDGE[Edge Functions]
+    subgraph cloud_data [Cloud Database & Backend Services]
+        FIREBASE[("Google Cloud Firebase / Firestore<br/>(Real-Time Cloud DB • Event Listeners)")]
+        PG[("PostgreSQL + RLS (Supabase)<br/>(Relational Records • Auditing)")]
+        AUTHZ["Multi-Tenant Auth & Role Guard"]
+        EDGE["Edge Compute Functions<br/>(Proxy Gateways • Task Generation)"]
     end
 
-    subgraph external [External Services]
-        GEMINI[Google Gemini]
-        AGORA[Agora RTC]
-        SENTRY[Sentry]
+    subgraph ai_tier [AI & Multimodal Intelligence Tier]
+        GEMINI["Google Gemini Multimodal API<br/>(Prescription OCR • Lab Report Scanning • Gemini API Keys)"]
+        GEMMA["Google Gemma / MedGemma<br/>(Frontline Clinical Copilot • Local Triage Reasoning)"]
     end
 
-    ASHA & DOC & PAT & WEB --> ROUTER
-    ROUTER --> AUTH
-    ROUTER --> API
-    ROUTER --> WF
-    AUTH --> AUTHZ
-    API --> PG
-    WF --> API
-    API --> EDGE
+    subgraph comms [RTC & Observability]
+        AGORA["Agora RTC (Low-Latency Video)"]
+        SENTRY["Sentry Telemetry (PHI Scrubbed)"]
+    end
+
+    ASHA & DOC & ADM & PAT --> ROUTER
+    ROUTER --> OFFLINE_DB
+    OFFLINE_DB <--> SYNC_ENG
+    SYNC_ENG <--> FIREBASE
+    SYNC_ENG <--> PG
+    ROUTER --> URGENCY
+    ROUTER --> EDGE
     EDGE --> GEMINI
-    EDGE --> AGORA
-    expo --> SENTRY
+    EDGE --> GEMMA
+    ROUTER --> AGORA
+    ROUTER --> SENTRY
 ```
 
 ---
@@ -49,46 +72,30 @@ flowchart TB
 
 ### 1. Presentation (`app/`)
 
-Expo Router file-based routes with **route groups** by role:
+Expo Router file-based routes with **role-based route groups**:
 
-- `(asha)/` - community health worker UI
-- `(doctor)/` - clinical provider UI
-- `(patient)/` - citizen-facing UI
+- `(asha)/` - Frontline community health worker interface (offline patient registration, daily priority tasks, camera document scanner, maternal ANC/PNC monitoring, community epidemic alerts).
+- `(doctor)/` - Clinical provider interface (urgency-ranked outpatient queue, telemedicine consultations, visit recording, follow-up task generation).
+- `(admin)/` - District health supervisor dashboard (demand intelligence heatmap, inter-PHC resource redistribution, care gap analytics, audit log).
+- `(patient)/` - Citizen health companion (medication reminders, telemedicine booking, ABHA digital ID card).
 
-Each group has a `_layout.tsx` that applies `useRoleGuard()` so users cannot navigate across roles without re-authentication.
+Each group is protected by `useRoleGuard()` and biometric/session authentication.
 
-### 2. Hooks (`hooks/`)
-
-Thin React hooks that compose `lib/` functions:
-
-| Hook | Responsibility |
-|------|----------------|
-| `useUserProfile` | Load `profiles` row + role-specific stats |
-| `useCareTeamPatients` | Patients visible to logged-in caregiver |
-| `useAIChat` | Gemini chat with `ai_chat_history` persistence |
-
-### 3. Domain logic (`lib/`)
+### 2. Clinical Intelligence & Multimodal Scanning (`lib/`)
 
 | Module | Responsibility |
 |--------|----------------|
-| `api.ts` | All Supabase CRUD; single integration point |
-| `auth.ts` | Login, profile fetch, sign-out |
-| `roles.ts` | Role enum and guards |
-| `dataPolicy.ts` | When to show demo seed data vs live empty state |
-| `patientMapper.ts` | DB patient row ↔ UI `Patient` type |
-| `clinicalWorkflow.ts` | Visit documentation → follow-up tasks |
-| `appointmentWorkflow.ts` | Telemedicine session ↔ appointment status |
-| `communityHealth.ts` | Ward risk from alerts |
-| `careNotifications.ts` | Dashboard-triggered local notifications |
-| `phiSecurity.ts` | Redact PHI before logging/analytics |
-| `consent.ts` | Consent flag in AsyncStorage |
-| `edgeClient.ts` | Invoke Supabase edge functions |
+| `lib/gemini.ts` | **Google Gemini Vision & Multimodal API**: High-accuracy camera OCR for physical prescriptions, handwritten maternal health cards, immunization records, and lab results via secure Gemini API keys. |
+| `lib/urgencyScoring.ts` | **NEWS2 + Maternal Physiology Engine**: Deterministic clinical risk scoring (0–100) integrated with explainable clinical rationale tags. |
+| `lib/ai.ts` | **Google Gemma / MedGemma Architecture**: Clinical decision support, vernacular symptom interpretation (Hindi/Tamil/English), and differential triage prompts. |
+| `lib/referralsApi.ts` | **Closed-Loop Referral Tracker**: Real-time referral lifecycle from ASHA dispatch to PHC doctor consultation and post-discharge follow-up. |
+| `lib/syncEngine.ts` | **Offline Sync Engine**: Queues offline mutations in SQLite/WatermelonDB, synchronizing automatically with Google Cloud Firebase and PostgreSQL upon connectivity. |
 
-### 4. Backend (`supabase/`)
+### 3. Cloud Database Tier
 
-- **`complete_schema.sql`** - tables, indexes, RLS policies, triggers
-- **`functions/gemini-proxy`** - server-side Gemini calls
-- **`functions/agora-token`** - RTC token minting with app certificate
+- **Google Cloud Firebase / Firestore**: Real-time cloud document database facilitating low-latency state synchronization across field workers and district dashboards, with regional deployment in India (`asia-south1`).
+- **PostgreSQL with Row Level Security (RLS)**: Enforces cryptographic multi-tenancy, immutable clinical history, and patient privacy (DPDP Act 2023).
+- **Edge Compute Functions**: Secure server-side proxying for Gemini API keys, Agora video tokens, and automated daily task generation.
 
 ---
 

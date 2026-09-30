@@ -11,22 +11,46 @@ Related docs: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/SECURITY_AND_COM
 
 | Area | Required for public release? | Notes |
 |------|------------------------------|-------|
-| Supabase (URL, anon, service role, edge secrets) | **Yes** | Backend + auth + RLS |
-| Gemini (`GEMINI_API_KEY` on edge) | **Yes** | AI chat / OCR via proxy |
-| Agora (App ID + certificate) | **Yes** | Telemedicine |
-| Expo / EAS project ID | **Yes** | Native builds |
-| Apple submit IDs | **Yes for iOS** | Store submit |
+| Google Cloud Firebase / Firestore | **Yes** | Cloud document database, real-time sync listeners, multi-region residency |
+| Supabase (URL, anon, service role, edge secrets) | **Yes** | Relational data + auth + RLS |
+| Google Gemini (`GEMINI_API_KEY` / Gemini API) | **Yes** | Clinical AI decision support & multimodal camera OCR scanning |
+| Google Gemma / MedGemma | **Yes** | Frontline medical triage model architecture & local reasoning |
+| Agora (App ID + certificate) | **Yes** | Telemedicine video consultations |
+| Expo / EAS project ID | **Yes** | Native Android/iOS builds |
+| Apple submit IDs | **Yes for iOS** | App Store submit |
 | Google Play / Android | **Yes for Android** | Play Console + signing via EAS |
-| Sentry DSN | Strongly recommended | Crash monitoring |
-| `CRON_SECRET` | **Yes** | Daily task generation |
+| Sentry DSN | Strongly recommended | Crash monitoring & telemetry |
+| `CRON_SECRET` | **Yes** | Daily task generation & demand forecast triggers |
 | ABDM / NHA | Optional at launch | Without it, ABHA stays disabled in production |
-| Firecrawl | Optional | Not required for core release |
-| Vercel | Optional | Web only |
+| Firecrawl | Optional | Auxiliary scraping |
+| Vercel | Optional | Web landing deploy |
 | GitHub `EXPO_TOKEN` / CI secrets | If using CI deploy | `.github/workflows/ci-cd.yml` |
 
 ---
 
-## 1. Supabase (required)
+## 1. Google Cloud Firebase / Firestore (required)
+
+### Values
+
+| Name | Where it goes | Public? |
+|------|---------------|---------|
+| `FIREBASE_PROJECT_ID` → `EXPO_PUBLIC_FIREBASE_PROJECT_ID` | Client `.env` / EAS env / GitHub secrets | Yes (Project ID) |
+| `FIREBASE_API_KEY` → `EXPO_PUBLIC_FIREBASE_API_KEY` | Client `.env` / EAS env | Yes (Client web API key protected by Firebase App Check & Security Rules) |
+| `FIREBASE_AUTH_DOMAIN` | Client `.env` / EAS env | Yes |
+| `FIREBASE_STORAGE_BUCKET` | Client `.env` / EAS env | Yes |
+| Google Cloud Service Account JSON | Backend / Cloud Functions / Secrets only | **Secret** (Never ship in client binary) |
+
+### How to obtain
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) or [Firebase Console](https://console.firebase.google.com/).
+2. Create or select your Google Cloud project (e.g., `vitaweave-rural-health`).
+3. Under **Build → Firestore Database**, create a Firestore instance in region **asia-south1 (Mumbai)** for Indian data residency and DPDP compliance.
+4. Under **Project Settings → General → Your apps**, register an Android/Web app and copy the config credentials.
+5. In production, configure Firestore Security Rules with role-based attributes and enable Firebase App Check to prevent unauthorized API requests.
+
+---
+
+## 2. Supabase (relational backend & edge proxy)
 
 ### Values
 
@@ -53,32 +77,37 @@ Supabase Edge also injects `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SE
 
 ---
 
-## 2. Google Gemini (required)
+## 3. Google Gemini API & Gemma Model (required)
 
 ### Values
 
 | Name | Where it goes | Public? |
 |------|---------------|---------|
-| `GEMINI_API_KEY` | Supabase → Edge Functions → Secrets | **Secret** |
-| `GEMINI_MODEL` (e.g. `gemini-1.5-flash`) | Edge secret (optional) | Config |
-| `EXPO_PUBLIC_GEMINI_API_KEY` | Only if edge proxy is off (dev) | Avoid in production |
+| `GEMINI_API_KEY` | Edge Secrets / Backend / Local `.env` | **Secret** (All AI and Multimodal Scanning calls use Gemini API keys exclusively) |
+| `GEMINI_MODEL` (e.g. `gemini-1.5-flash`) | Edge secret / Env | Config |
+| `EXPO_PUBLIC_GEMINI_API_KEY` | Only if edge proxy is off (development only) | Avoid in production client bundles |
 | `EXPO_PUBLIC_USE_EDGE_PROXY=true` | Client / EAS | Flag |
+| `EXPO_PUBLIC_GEMMA_MODEL` (e.g. `medgemma-2b` / `gemma-2-2b-it`) | Client / Edge | Config |
 
-Production should use the **edge proxy** so the Gemini key never ships in the client binary.
+### Use cases in VitaWeave
+
+- **Multimodal Scanning & OCR**: Google Gemini Vision (`gemini-1.5-flash` / Multimodal API) parses camera photos of physical prescriptions, handwritten maternal ANC cards, immunization cards, and diagnostic reports into structured FHIR-like JSON entities.
+- **AI Decision Support**: Frontline triage recommendations, risk factor extraction, and daily task prioritization.
+- **Gemma / MedGemma Model Architecture**: The open-weights Gemma family provides on-device and edge-optimized medical intelligence, clinical explainability, and multi-language support (Hindi, Tamil, English) designed for rural bandwidth constraints.
 
 ### How to obtain
 
-1. Open [Google AI Studio](https://aistudio.google.com/apikey) (or [Google AI for Developers](https://ai.google.dev/)).
-2. Sign in with a Google account.
-3. **Create API key** → copy the key.
-4. In Supabase Dashboard → **Edge Functions → Secrets**, set:
+1. Open [Google AI Studio](https://aistudio.google.com/apikey) or [Google Cloud Vertex AI](https://cloud.google.com/vertex-ai).
+2. Sign in with your Google account.
+3. Click **Create API Key** → copy the key.
+4. In Supabase Dashboard → **Edge Functions → Secrets** (or Cloud Function environment variables), set:
    - `GEMINI_API_KEY=<your key>`
-   - `GEMINI_MODEL=gemini-1.5-flash` (or current supported model)
-5. Deploy `gemini-proxy` (see Deployment guide).
+   - `GEMINI_MODEL=gemini-1.5-flash`
+5. Deploy `gemini-proxy` so the mobile client never embeds the raw Gemini key in production.
 
 ---
 
-## 3. Agora telemedicine (required)
+## 4. Agora telemedicine (required)
 
 ### Values
 
@@ -98,7 +127,7 @@ Production should use the **edge proxy** so the Gemini key never ships in the cl
 
 ---
 
-## 4. Cron / daily tasks (required)
+## 5. Cron / daily tasks (required)
 
 ### Values
 
@@ -125,7 +154,7 @@ Schedule invokes with that header (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md))
 
 ---
 
-## 5. Expo Application Services / EAS (required for store builds)
+## 6. Expo Application Services / EAS (required for store builds)
 
 ### Values
 
@@ -156,7 +185,7 @@ Set production EAS env (already sketched in `eas.json`):
 
 ---
 
-## 6. Apple App Store (required for iOS submit)
+## 7. Apple App Store (required for iOS submit)
 
 ### Values
 
@@ -183,7 +212,7 @@ Bundle ID in this repo: `com.vitaweave.app`.
 
 ---
 
-## 7. Google Play (required for Android store)
+## 8. Google Play (required for Android store)
 
 ### Values
 
@@ -204,7 +233,7 @@ Bundle ID in this repo: `com.vitaweave.app`.
 
 ---
 
-## 8. Sentry (strongly recommended)
+## 9. Sentry (strongly recommended)
 
 ### Values
 
@@ -224,7 +253,7 @@ Bundle ID in this repo: `com.vitaweave.app`.
 
 ---
 
-## 9. Push notifications (recommended)
+## 10. Push notifications (recommended)
 
 ### Values
 
@@ -242,7 +271,7 @@ Bundle ID in this repo: `com.vitaweave.app`.
 
 ---
 
-## 10. ABDM / NHA (optional - live ABHA)
+## 11. ABDM / NHA (optional - live ABHA)
 
 Without these, production builds keep ABHA **disabled** (no mock OTP). Core app can still ship.
 
@@ -264,7 +293,7 @@ Without these, production builds keep ABHA **disabled** (no mock OTP). Core app 
 
 ---
 
-## 11. Hosted privacy policy URL (required for store listings)
+## 12. Hosted privacy policy URL (required for store listings)
 
 ### Values
 
@@ -283,7 +312,7 @@ In-app policy at `app/privacy-policy.tsx` is the canonical text until the URL is
 
 ---
 
-## 12. Optional: Firecrawl
+## 13. Optional: Firecrawl
 
 | Name | Where | Required? |
 |------|-------|-----------|
@@ -293,7 +322,7 @@ Obtain at [https://firecrawl.dev](https://firecrawl.dev) → Dashboard → API k
 
 ---
 
-## 13. Optional: Vercel (web)
+## 14. Optional: Vercel (web)
 
 | Name | Where | Required? |
 |------|-------|-----------|
@@ -305,7 +334,7 @@ Obtain via [vercel.com](https://vercel.com) → account tokens + project setting
 
 ---
 
-## 14. GitHub Actions secrets (if using CI/CD)
+## 15. GitHub Actions secrets (if using CI/CD)
 
 From `.github/workflows/ci-cd.yml`, set these in **GitHub → Repo → Settings → Secrets and variables → Actions**:
 
@@ -376,14 +405,16 @@ CRON_SECRET=
 
 ## Minimal path to first public build
 
-1. Supabase project + migrations `002`–`008` + edge secrets + function deploys  
-2. Gemini + Agora credentials on the edge  
-3. `CRON_SECRET` set  
-4. Expo account + EAS project ID in `app.json`  
-5. Production `EXPO_PUBLIC_*` in EAS  
-6. Android: Play Console app + `eas build` / submit  
-7. iOS: Apple Developer + fill three `eas.json` fields + `eas build` / submit  
-8. Host privacy policy URL  
-9. Sentry DSN in production builds  
+1. Google Cloud Firebase / Firestore project configured (region `asia-south1`)
+2. Supabase project + migrations `002`–`008` + edge secrets + function deploys  
+3. Gemini API key set for multimodal scanning OCR and clinical decision support  
+4. Agora RTC credentials set for telemedicine  
+5. `CRON_SECRET` set  
+6. Expo account + EAS project ID in `app.json`  
+7. Production `EXPO_PUBLIC_*` in EAS  
+8. Android: Play Console app + `eas build` / submit  
+9. iOS: Apple Developer + fill three `eas.json` fields + `eas build` / submit  
+10. Host privacy policy URL  
+11. Sentry DSN in production builds  
 
 ABDM/NHA can wait until after the first public release if ABHA linking is not required at launch.

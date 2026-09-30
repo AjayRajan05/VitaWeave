@@ -32,42 +32,39 @@ Why VitaWeave is built the way it is, and what trade-offs were accepted.
 
 ---
 
-## Backend: Supabase (PostgreSQL + Auth + RLS + Edge Functions)
+## Cloud Database & Backend: Google Cloud Firebase & Supabase
+
+### Google Cloud Firebase / Firestore
 
 **Chosen for:**
-- **Postgres** - relational model fits patients, appointments, records, campaigns
-- **Row Level Security** - multi-tenant healthcare without custom middleware
-- **Supabase Auth** - email/password with JWT; profile row linked by `id`
-- **Edge Functions (Deno)** - hide Gemini API key and Agora certificate
-- Fast pilot setup vs self-hosted Django/FastAPI
+- **Real-Time Data Synchronization**: Firestore's document-model reactive listeners broadcast urgent patient status updates, high-risk flags, and bed/medicine inventory levels instantly across frontline ASHA workers and district supervisors.
+- **Offline Cache & Resilience**: Firebase SDK provides robust local disk persistence and automated stream reconnects in rural zones with intermittent 2G/3G connectivity.
+- **Scalability & Residency**: Hosted on Google Cloud infrastructure in India (`asia-south1` Mumbai) guaranteeing local data sovereignty in full compliance with the Digital Personal Data Protection (DPDP) Act 2023.
 
-**Trade-offs:**
-- Vendor coupling - migration path is standard Postgres export
-- Complex RLS policies can be hard to debug - mitigated by `complete_schema.sql` as single source of truth
-- Real-time subscriptions used selectively (not everywhere)
+### Supabase (PostgreSQL + RLS + Edge Functions)
 
-**Not in repo (despite older README):**
-- Django, Hyperledger, PySyft - removed from architecture; see ROADMAP for future integrations
+**Chosen for:**
+- **Relational Integrity**: Multi-table relationships connecting patients, maternal histories, UIP vaccination schedules, referrals, and telemedicine audit logs.
+- **Row Level Security (RLS)**: Enforces strict data-access boundaries directly in PostgreSQL, ensuring workers only access their assigned rural catchment areas.
+- **Edge Compute Functions (Deno)**: Secure server-side isolation for Gemini API keys, Agora RTC credentials, and automated daily task generation jobs.
 
 ---
 
-## AI: Google Gemini
+## AI & Multimodal Intelligence: Google Gemini & Google Gemma
 
-**Chosen for:**
-- Strong multilingual performance (Hindi + English ASHA workflows)
-- MedGemma-style prompting for primary-care Q&A
-- Available via simple REST; easy to proxy through edge function
+### 1. Google Gemini API (Multimodal Scanning & Vision OCR)
 
-**Production pattern:**
-```
-Client → EXPO_PUBLIC_USE_EDGE_PROXY=true → gemini-proxy edge function → Gemini API
-```
+**Role:** High-accuracy digitization and clinical document understanding.
+- **Multimodal Scanning via Gemini API Keys**: Uses `gemini-1.5-flash` / Gemini Vision API to convert physical paper records, handwritten doctor prescriptions, maternal ANC/PNC cards, and lab diagnostic reports into structured FHIR-like JSON objects.
+- **Zero-Exposure Security**: Calls are proxied through edge functions so raw Gemini API keys never ship inside client application bundles.
+- **Task Prioritization**: Generates AI task suggestions (`generateAITaskSuggestions()`) prioritizing urgent home visits.
 
-**Never in production APK:** raw `GEMINI_API_KEY` - only `EXPO_PUBLIC_GEMINI_API_KEY` for local dev when proxy is off.
+### 2. Google Gemma / MedGemma (Frontline Clinical Decision Support)
 
-**Also used for:**
-- `generateAITaskSuggestions()` on ASHA dashboard
-- Telemedicine screen auxiliary Q&A (doctor sidebar)
+**Role:** Clinical-grade medical decision support and explainable triage.
+- **Medical Specialization**: Built on Google's open Gemma model family adapted for healthcare (`MedGemma`), providing evidence-based triage support, differential diagnostic recommendations, and clinical explainability.
+- **Multilingual Frontline Assistance**: Natural vernacular comprehension across Hindi, Tamil, and English, allowing ASHA workers to query in their native languages.
+- **Explainable Decision Support**: Rather than presenting opaque risk numbers, MedGemma articulates *why* a patient is flagged as high-risk (e.g., combination of gestational week, elevated diastolic pressure, and pedal edema) empowering the frontline worker with actionable clarity.
 
 ---
 

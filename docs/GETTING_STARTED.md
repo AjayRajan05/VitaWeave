@@ -32,12 +32,24 @@ cp .env.example .env
 Minimum for local development:
 
 ```env
+# Google Cloud Firebase
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-firebase-project-id
+EXPO_PUBLIC_FIREBASE_API_KEY=your-firebase-api-key
+
+# Google Gemini API & Gemma Model (scanning & decision intelligence)
+EXPO_PUBLIC_GEMINI_API_KEY=AIza...
+EXPO_PUBLIC_GEMINI_MODEL=gemini-1.5-flash
+EXPO_PUBLIC_USE_EDGE_PROXY=false
+
+# Supabase Backend
 EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-EXPO_PUBLIC_GEMINI_API_KEY=AIza...
+
+# Agora Telemedicine RTC
 EXPO_PUBLIC_AGORA_APP_ID=...
+
+# App Configuration
 EXPO_PUBLIC_DEV_MODE=true
-EXPO_PUBLIC_USE_EDGE_PROXY=false
 ```
 
 | Flag | When |
